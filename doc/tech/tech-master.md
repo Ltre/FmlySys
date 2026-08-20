@@ -1,7 +1,7 @@
 # FmlySys 初始技术需求文档
 
-> 建议文件名：`doc/technical-requestment.md`
-> 文档状态：Initial Draft / V0.1
+> 文件：`doc/tech/tech-master.md`
+> 文档状态：Initial Draft / V0.2
 > 对应业务需求：`doc/requestment.md`
 > 初始讨论参考：`doc/prompt/first.md`
 
@@ -9,17 +9,21 @@
 
 # 1. 文档目的
 
-本文档在《家族公共事务与共同资产治理系统需求文档》的基础上，明确 FmlySys 第一阶段开发所采用的技术架构、数据模型原则、认证方式、权限边界、接口边界、数据安全、审计、附件存储、部署和备份等技术要求。
+本文档在《家族公共事务与共同资产治理系统需求文档》的基础上，明确 FmlySys 第一阶段开发所采用的技术架构、数据模型原则、认证方式、权限边界、接口边界、数据安全、审计、附件存储、系统数据分区、部署和备份等技术要求。
 
 本文档重点回答：
 
 * 系统使用什么技术实现；
 * 前台、后台如何划分；
 * SQLite 如何承载公共财产及事务数据；
+* 系统数据分区如何组织；
 * 公共财产余额如何计算；
 * 如何保证历史修改可追溯；
 * 家族成员与管理员如何认证；
 * 附件和账单凭证如何保存；
+* 如何备份本系统数据；
+* 如何一键将数据备份至 Google Drive；
+* 如何从外部备份文件导入数据且不覆盖当前系统数据；
 * 哪些技术能力属于第一阶段；
 * 哪些能力明确暂不建设；
 * 系统规模较小时应避免哪些过度设计。
@@ -32,6 +36,7 @@
 * API 文档；
 * 前端交互设计；
 * 部署文档；
+* 备份与恢复文档；
 * 测试方案。
 
 ---
@@ -87,35 +92,116 @@ FmlySys 是一个：
 * 权限检查；
 * 财务计算；
 * SQLite 访问；
+* 数据分区管理；
 * 附件管理；
 * 审计日志；
 * 提醒计算；
+* 备份与导入；
+* Google Drive 备份；
 * 系统管理。
 
 第一阶段不拆分微服务。
 
 ---
 
-# 4. 数据库
+# 4. 数据存储与系统数据分区
 
 使用：
 
 > **SQLite**
 
-数据库作为系统结构化数据的唯一权威持久化存储。
+SQLite 作为系统结构化数据的唯一权威持久化存储。
 
-建议：
+但 FmlySys 不应永久假定整个实例只有唯一一份业务数据库。
+
+因为系统需要支持：
+
+> 从外部备份文件导入历史系统数据，但不覆盖现有系统数据，而是建立新的独立系统数据分区。
+
+因此从初始架构开始引入：
+
+> **System Data Partition / 系统数据分区**
+
+概念。
+
+---
+
+## 4.1 系统级数据与业务数据分离
+
+推荐采用：
 
 ```text
 data/
-└── fmlysys.db
+├── system.db
+│
+├── partitions/
+│   ├── p_default/
+│   │   ├── fmlysys.db
+│   │   └── uploads/
+│   │
+│   ├── p_xxxxx/
+│   │   ├── fmlysys.db
+│   │   └── uploads/
+│   │
+│   └── ...
+│
+├── backup/
+└── temp/
 ```
 
-数据库中存储：
+其中：
+
+```text
+system.db
+```
+
+负责保存 FmlySys 实例级数据。
+
+而：
+
+```text
+partitions/<partition_id>/
+```
+
+表示一套完整、独立的家族业务数据。
+
+---
+
+## 4.2 system.db
+
+系统级数据库用于保存不属于任何一个具体家族业务数据集的内容。
+
+例如：
+
+* 后台管理员账户；
+* Google Authenticator TOTP 配置；
+* 后台管理员 Session；
+* 数据分区注册信息；
+* 当前活动数据分区；
+* Google Drive OAuth 授权信息；
+* Google Drive Refresh Token；
+* 备份任务记录；
+* 全局系统配置；
+* 系统级操作日志。
+
+这些信息不会因为切换家族业务数据分区而改变。
+
+---
+
+## 4.3 数据分区数据库
+
+每个数据分区拥有独立：
+
+```text
+fmlysys.db
+```
+
+其中保存：
 
 * 家族成员；
-* 登录身份；
-* 权限；
+* 微信登录身份；
+* 普通成员 Session；
+* 家族成员权限；
 * 公共财产记录；
 * 公共资产持有人；
 * 公共消费；
@@ -126,15 +212,175 @@ data/
 * 家族事务；
 * 决议；
 * 提醒；
+* 档案；
 * 附件元数据；
-* 操作审计；
-* 系统配置。
+* 业务操作审计。
+
+同时拥有自己独立的：
+
+```text
+uploads/
+```
+
+目录。
+
+---
+
+## 4.4 为什么数据分区采用独立 SQLite
+
+不采用：
+
+```text
+所有业务表增加 partition_id
+```
+
+然后把所有数据分区强行塞进一个大型 SQLite 数据库。
+
+原因包括：
+
+1. 外部备份导入容易发生 ID 冲突；
+2. 不同备份可能对应不同数据库 Schema Version；
+3. 容易误把两个数据集中的成员、事务和附件关联起来；
+4. 导入失败可能污染当前正常运行的数据；
+5. 删除一个导入的数据分区非常困难；
+6. 失去真正的数据隔离；
+7. 备份、迁移和恢复复杂度反而增加。
+
+因此：
+
+> **一个业务数据分区 = 一个独立 SQLite 数据库 + 一个独立 uploads 目录。**
+
+---
+
+## 4.5 默认数据分区
+
+系统第一次初始化时自动建立：
+
+```text
+p_default
+```
+
+或其他随机唯一 ID。
+
+该分区成为：
+
+> 默认活动数据分区。
+
+在没有进行备份导入等操作时，用户不会明显感知“数据分区”的存在。
+
+---
+
+## 4.6 活动数据分区
+
+系统任意时刻有且仅有一个：
+
+> **Active Partition / 活动数据分区**
+
+普通成员访问：
+
+```text
+/
+```
+
+以及：
+
+```text
+/api/v1/*
+```
+
+时，业务请求默认绑定当前活动数据分区。
+
+客户端不得自行通过参数：
+
+```text
+partition_id
+```
+
+访问任意其他分区。
+
+数据分区选择属于服务端控制范围。
+
+---
+
+## 4.7 数据分区注册表
+
+`system.db` 中建议建立：
+
+```text
+data_partitions
+```
+
+至少保存：
+
+```text
+id
+partition_uuid
+display_name
+
+source_type
+source_partition_uuid
+source_backup_id
+
+path
+
+app_version
+schema_version
+
+created_at
+imported_at
+last_opened_at
+
+status
+is_active
+```
+
+`source_type` 可以包括：
+
+```text
+INITIAL
+IMPORTED_FILE
+GOOGLE_DRIVE_BACKUP
+MANUAL
+```
+
+---
+
+## 4.8 数据分区之间不自动合并
+
+V1 明确不提供：
+
+```text
+Partition A
++
+Partition B
+=
+Merged Partition
+```
+
+能力。
+
+特别禁止自动：
+
+* 合并同名成员；
+* 合并公共财产流水；
+* 合并事务；
+* 合并附件；
+* 根据姓名猜测两个人是同一个人；
+* 根据金额猜测两条记录属于同一笔业务。
+
+导入备份的语义始终是：
+
+> **创建一个新的、独立的数据分区。**
+
+不是：
+
+> 把数据追加进当前分区。
 
 ---
 
 # 5. SQLite 使用原则
 
-启动数据库连接后至少启用：
+所有 SQLite 数据库打开后至少启用：
 
 ```sql
 PRAGMA foreign_keys = ON;
@@ -158,6 +404,12 @@ database is locked
 ```
 
 等 SQLite 并发写入情况。
+
+一个业务请求只能明确绑定：
+
+> 一个业务数据分区数据库。
+
+禁止在一个普通业务事务中跨两个业务分区修改数据。
 
 ---
 
@@ -270,12 +522,18 @@ FmlySys Go Server
    ├── Authentication
    ├── Authorization
    ├── Business Services
+   ├── Ledger Service
+   ├── Partition Manager
+   ├── Backup / Import
+   ├── Google Drive Backup
    ├── Audit
    ├── Attachment Service
    │
-   ├── SQLite
+   ├── system.db
    │
-   └── Local File Storage
+   └── Active Data Partition
+       ├── fmlysys.db
+       └── uploads/
 ```
 
 不引入：
@@ -424,7 +682,10 @@ web/
 /admin/permissions
 /admin/audit
 /admin/settings
+
 /admin/backup
+/admin/data-partitions
+/admin/data-partitions/import
 ```
 
 后台负责：
@@ -435,6 +696,9 @@ web/
 * 后台财务管理；
 * 敏感资料权限；
 * 审计查看；
+* 数据分区管理；
+* Google Drive 备份；
+* 外部备份导入；
 * 系统维护。
 
 ---
@@ -471,6 +735,12 @@ Family Member Identity
 Admin Identity
 ```
 
+普通成员 Session 还必须绑定创建该 Session 时的：
+
+> 数据分区。
+
+切换活动数据分区后，应使普通成员 Session 失效并重新认证，防止旧 Session 继续操作新分区。
+
 ---
 
 # 14. API 路径
@@ -503,10 +773,12 @@ API 第一阶段仅供 FmlySys 自己的 Web 页面使用。
 因此第一阶段：
 
 * 不开放 API Key；
-* 不建设第三方 OAuth；
+* 不建设第三方业务 OAuth；
 * 不提供 CORS 公共调用；
 * 不提供开放平台；
 * 不承诺 API 长期向第三方兼容。
+
+Google Drive OAuth 属于系统备份功能所需的外部服务授权，不属于面向第三方开发者开放 API。
 
 ---
 
@@ -535,6 +807,12 @@ identity
 ```text
 member_id
 ```
+
+成员和身份属于：
+
+> 当前业务数据分区。
+
+不同数据分区中的成员不存在自动关联关系。
 
 ---
 
@@ -582,7 +860,7 @@ member_id
 ↓
 取得微信身份
 ↓
-身份尚未绑定成员
+身份尚未绑定当前数据分区成员
 ↓
 创建加入申请
 ↓
@@ -615,7 +893,7 @@ member_id
 /admin/join-requests
 ```
 
-处理申请。
+处理当前活动数据分区中的申请。
 
 管理员可以：
 
@@ -711,6 +989,10 @@ Google Authenticator 只是客户端验证器。
 * Session；
 * 登录失败限制。
 
+后台管理员属于系统级身份：
+
+> 不随业务数据分区切换。
+
 ---
 
 # 22. 后台不建议只使用六位 TOTP
@@ -740,7 +1022,13 @@ Google Authenticator TOTP
 
 # 23. 管理员账户
 
-建议建立独立：
+管理员账户保存在：
+
+```text
+system.db
+```
+
+建议建立：
 
 ```text
 admin_users
@@ -777,7 +1065,8 @@ TOTP Secret 禁止：
 * 输出日志；
 * 返回普通 API；
 * 显示给其他管理员；
-* 保存在浏览器 LocalStorage。
+* 保存在浏览器 LocalStorage；
+* 包含在普通业务数据分区备份中。
 
 数据库中如果保存 TOTP Secret，应使用服务端 Master Key 加密。
 
@@ -862,19 +1151,25 @@ SQLite 只保存：
 
 而非原始 Session Token。
 
-推荐 Session 表：
+后台 Session 保存于：
 
 ```text
-sessions
-admin_sessions
+system.db
 ```
 
-字段包括：
+普通成员 Session 保存于对应业务分区，或者保存在 `system.db` 中并明确记录 `partition_id`。
+
+无论采取哪种方式：
+
+> 普通成员 Session 必须明确绑定数据分区。
+
+推荐字段：
 
 ```text
 id
 token_hash
 actor_id
+partition_id
 created_at
 expires_at
 last_seen_at
@@ -956,6 +1251,10 @@ admin
 
 独立管理。
 
+成员角色属于：
+
+> 当前业务数据分区。
+
 ---
 
 # 31. 资源级权限
@@ -998,13 +1297,20 @@ permission
 
 必须建立数据库 Migration。
 
+系统级数据库和业务数据分区应分别维护 Migration。
+
 例如：
 
 ```text
 migrations/
-├── 000001_init.sql
-├── 000002_asset_ledger.sql
-└── ...
+├── system/
+│   ├── 000001_init.sql
+│   └── ...
+│
+└── partition/
+    ├── 000001_init.sql
+    ├── 000002_asset_ledger.sql
+    └── ...
 ```
 
 数据库记录：
@@ -1015,10 +1321,22 @@ schema_migrations
 
 每次启动：
 
-1. 检查数据库版本；
-2. 执行未运行 Migration；
-3. Migration 失败则终止启动；
-4. 不允许带着半升级数据库继续工作。
+1. 检查 `system.db` Schema Version；
+2. 执行系统数据库未运行 Migration；
+3. 检查当前活动数据分区；
+4. 执行活动分区未运行 Migration；
+5. Migration 失败则终止启动；
+6. 不允许带着半升级数据库继续工作。
+
+外部备份导入时：
+
+> Migration 只能作用于刚创建的新数据分区副本。
+
+不得为了兼容导入文件而修改现有活动数据分区。
+
+如果外部备份 Schema Version 高于当前程序支持版本：
+
+> 拒绝导入，并提示先升级 FmlySys。
 
 生产数据库禁止依赖人工逐条执行 SQL 才能升级。
 
@@ -1050,6 +1368,20 @@ sqlc
 * 可审核；
 * 可测试；
 * 可明确知道数据如何计算。
+
+数据库访问层必须明确区分：
+
+```text
+SystemRepository
+```
+
+与：
+
+```text
+PartitionRepository
+```
+
+避免业务代码误将系统级数据和分区业务数据混写。
 
 ---
 
@@ -1385,6 +1717,14 @@ current_balance
 
 > 哪一条业务事件造成不一致。
 
+该一致性关系只在：
+
+> 同一业务数据分区内部
+
+计算。
+
+不同数据分区的公共财产不得混合统计。
+
 ---
 
 # 47. 公共财产净额
@@ -1581,7 +1921,7 @@ DELETE FROM ...
 
 # 54. 审计日志
 
-建立统一：
+业务数据分区建立统一：
 
 ```text
 audit_logs
@@ -1604,6 +1944,21 @@ ip
 user_agent
 created_at
 ```
+
+系统级操作另外记录：
+
+```text
+system_audit_logs
+```
+
+用于：
+
+* 切换数据分区；
+* 导入备份；
+* Google Drive 授权；
+* Google Drive 备份；
+* 修改管理员；
+* 系统设置修改。
 
 ---
 
@@ -1633,7 +1988,7 @@ system
 
 # 56. 审计写入事务
 
-任何重要数据修改：
+任何重要业务数据修改：
 
 ```text
 BEGIN
@@ -1655,6 +2010,8 @@ COMMIT
 ```
 
 后仍然返回成功。
+
+系统级配置修改与系统级 Audit 也遵循同样规则。
 
 ---
 
@@ -1728,7 +2085,28 @@ UPDATE ... WHERE id=? AND version=?
 
 # 59. 初始核心数据库实体
 
-V1 建议至少包含：
+## system.db
+
+建议至少包含：
+
+```text
+schema_migrations
+
+admin_users
+admin_sessions
+
+data_partitions
+
+google_drive_connections
+backup_records
+
+system_settings
+system_audit_logs
+```
+
+## 每个业务数据分区
+
+建议至少包含：
 
 ```text
 schema_migrations
@@ -1741,9 +2119,7 @@ roles
 member_roles
 resource_acl
 
-admin_users
 sessions
-admin_sessions
 
 public_asset_sources
 public_expenses
@@ -2206,17 +2582,25 @@ decision_votes
 
 文件本体第一阶段不保存到 SQLite BLOB。
 
-推荐：
+每个数据分区分别保存自己的附件：
 
 ```text
 data/
-├── fmlysys.db
-└── uploads/
+└── partitions/
+    └── <partition_id>/
+        ├── fmlysys.db
+        └── uploads/
 ```
 
 数据库只保存：
 
 > 附件元数据。
+
+不同数据分区不得共用同一个 `uploads/` 目录。
+
+这样才能保证：
+
+> 备份一个数据分区时，其数据库与附件天然形成完整数据单元。
 
 ---
 
@@ -2292,7 +2676,10 @@ https://host/uploads/xxx.jpg
 
 服务器读取附件前必须：
 
-> 检查当前成员是否拥有查看该业务对象的权限。
+1. 确定当前活动数据分区；
+2. 检查当前成员身份；
+3. 检查成员是否拥有查看业务对象的权限；
+4. 从对应分区的 `uploads/` 读取文件。
 
 尤其适用于：
 
@@ -2461,7 +2848,7 @@ V1 至少支持：
 
 # 86. 首页聚合
 
-`/` 登录后的首页至少聚合：
+`/` 登录后的首页至少聚合当前活动数据分区中的：
 
 ### 公共财产
 
@@ -2500,6 +2887,8 @@ V1 至少支持：
 
 不能另外维护一份独立首页数据源。
 
+不同数据分区之间不做首页数据聚合。
+
 ---
 
 # 87. 后台功能范围
@@ -2508,7 +2897,7 @@ V1 至少支持：
 
 ## 成员
 
-* 查看成员；
+* 查看当前分区成员；
 * 创建成员；
 * 禁用成员；
 * 审核加入申请；
@@ -2521,20 +2910,37 @@ V1 至少支持：
 
 ## 公共财产
 
-* 查看全账；
+* 查看当前数据分区全账；
 * 必要的管理操作；
 * 查看不一致告警。
 
 ## 审计
 
-* 查看操作历史；
-* 按用户、对象、时间过滤。
+* 查看业务操作历史；
+* 按用户、对象、时间过滤；
+* 查看系统级管理操作历史。
+
+## 数据分区
+
+* 查看全部数据分区；
+* 查看当前活动分区；
+* 查看分区来源；
+* 切换活动数据分区；
+* 导入外部备份为新数据分区。
+
+## 备份
+
+* 创建本地完整备份；
+* 一键备份当前数据分区至 Google Drive；
+* 查看备份记录；
+* 查看备份成功/失败状态；
+* 管理 Google Drive 授权。
 
 ## 系统
 
 * 系统配置；
-* 备份；
-* 数据库状态。
+* 数据库状态；
+* SQLite 完整性检查。
 
 ---
 
@@ -2547,10 +2953,11 @@ V1 至少支持：
 技术上必须同时满足：
 
 1. 当前成员拥有编辑权限；
-2. 使用乐观锁避免覆盖；
-3. 修改与 Audit 同事务；
-4. 修改后相关余额立即重新计算；
-5. 不更新任何历史 `before_balance` / `after_balance`。
+2. 当前成员 Session 属于当前活动数据分区；
+3. 使用乐观锁避免覆盖；
+4. 修改与 Audit 同事务；
+5. 修改后相关余额立即重新计算；
+6. 不更新任何历史 `before_balance` / `after_balance`。
 
 ---
 
@@ -2592,6 +2999,10 @@ public asset net
 ```text
 发现 ¥xxx 差异
 ```
+
+检查范围始终限定：
+
+> 一个具体业务数据分区。
 
 ---
 
@@ -2638,9 +3049,18 @@ config.yaml
 ```text
 WECHAT_APP_SECRET
 FMLYSYS_MASTER_KEY
+
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
 ```
 
 不得提交 Git。
+
+Google Drive OAuth Refresh Token 等动态秘密应：
+
+* 保存在 `system.db`；
+* 使用 `FMLYSYS_MASTER_KEY` 加密；
+* 不进入普通业务数据分区备份。
 
 ---
 
@@ -2657,6 +3077,7 @@ FmlySys/
 ├── internal/
 │   ├── config/
 │   ├── db/
+│   ├── partition/
 │   ├── auth/
 │   ├── admin/
 │   ├── member/
@@ -2668,23 +3089,36 @@ FmlySys/
 │   ├── attachment/
 │   ├── reminder/
 │   ├── audit/
+│   ├── backup/
+│   ├── googledrive/
 │   └── httpserver/
 │
 ├── migrations/
+│   ├── system/
+│   └── partition/
 │
 ├── web/
 │   ├── templates/
 │   └── static/
 │
 ├── data/
-│   ├── fmlysys.db
-│   └── uploads/
+│   ├── system.db
+│   │
+│   ├── partitions/
+│   │   ├── p_default/
+│   │   │   ├── fmlysys.db
+│   │   │   └── uploads/
+│   │   └── ...
+│   │
+│   ├── backup/
+│   └── temp/
 │
 ├── doc/
 │   ├── prompt/
 │   │   └── first.md
 │   ├── requestment.md
-│   └── technical-requestment.md
+│   └── tech/
+│       └── tech-master.md
 │
 ├── go.mod
 ├── go.sum
@@ -2727,9 +3161,21 @@ AssetService
 
 或者对应 Ledger Service。
 
-避免：
+数据分区访问统一经过：
 
-> 不同 Handler 各自实现一套余额增减逻辑。
+```text
+PartitionManager
+```
+
+避免业务 Handler 自行拼接数据分区文件路径。
+
+备份统一经过：
+
+```text
+BackupService
+```
+
+避免后台页面直接复制数据库文件。
 
 ---
 
@@ -2761,7 +3207,13 @@ GetExpenseAfterBalance(expenseID)
 GetPendingReimbursement(memberID)
 ```
 
-确保整个系统只有一套财务语义。
+LedgerService 必须绑定一个明确的：
+
+```text
+PartitionContext
+```
+
+确保整个系统只有一套财务语义，同时不会跨数据分区计算。
 
 ---
 
@@ -2829,9 +3281,13 @@ id ASC
 * 服务启动；
 * HTTP Error；
 * 数据库错误；
+* 数据分区切换错误；
 * 微信认证错误；
 * 管理登录；
 * 文件错误；
+* 备份错误；
+* Google Drive API 错误；
+* 数据导入错误；
 * 系统任务错误。
 
 应用日志与：
@@ -2854,7 +3310,13 @@ audit_logs
 
 > 谁修改了什么业务数据。
 
-两者必须分开。
+### System Audit Log
+
+解决：
+
+> 谁执行了数据分区、备份、导入等系统管理操作。
+
+三者职责必须区分。
 
 ---
 
@@ -2867,6 +3329,9 @@ audit_logs
 * Session Cookie；
 * 微信 App Secret；
 * OAuth Access Token；
+* Google OAuth Refresh Token；
+* Google Client Secret；
+* FMLYSYS_MASTER_KEY；
 * 敏感文件正文；
 * 完整身份证号码等敏感资料。
 
@@ -2896,6 +3361,14 @@ request_id
 → Error Log
 ```
 
+备份和导入任务还可以单独产生：
+
+```text
+operation_id
+```
+
+用于追踪一次完整长操作。
+
 ---
 
 # 100. HTTPS
@@ -2917,6 +3390,8 @@ Go 服务推荐监听：
 
 等反向代理处理 TLS。
 
+Google OAuth 回调也必须使用受支持的安全回调地址。
+
 ---
 
 # 101. 系统“非公开”含义
@@ -2929,7 +3404,7 @@ Go 服务推荐监听：
 
 * 不面向社会注册；
 * 不提供公共内容社区；
-* 不提供第三方 API；
+* 不提供第三方业务 API；
 * 不追求搜索引擎收录；
 * 只有家族成员和管理员使用。
 
@@ -2947,6 +3422,8 @@ Go 服务推荐监听：
 * 权限；
 
 仍必须完整实现。
+
+Google Drive 属于管理员主动配置的外部备份服务，不改变 FmlySys 本身的非公开定位。
 
 ---
 
@@ -2966,6 +3443,15 @@ Go 服务推荐监听：
 不能替代：
 
 > 管理员密码 + TOTP。
+
+尤其：
+
+* 数据分区切换；
+* 外部备份导入；
+* Google Drive 授权；
+* 备份管理；
+
+均只能通过管理员权限操作。
 
 ---
 
@@ -3001,6 +3487,16 @@ Strict-Transport-Security
 
 方式拼接用户输入。
 
+数据分区数据库路径也不得直接取自 HTTP 请求参数。
+
+必须根据：
+
+```text
+partition_id
+```
+
+从 `system.db` 中的合法注册记录解析真实目录。
+
 ---
 
 # 105. XSS
@@ -3035,21 +3531,72 @@ html/template
 
 因此备份必须作为：
 
-> V1 基础能力。
+> **V1 基础能力。**
 
-至少需要备份：
+系统至少支持：
+
+1. 创建本地完整业务数据备份；
+2. 一键将当前活动数据分区备份至 Google Drive；
+3. 从外部 FmlySys 备份文件导入数据；
+4. 外部备份导入时创建新的系统数据分区；
+5. 导入绝不覆盖原有数据分区。
+
+普通备份的基本单位为：
+
+> **一个完整业务数据分区。**
+
+即：
 
 ```text
-SQLite Database
+fmlysys.db
 +
 uploads/
 ```
 
 二者必须匹配。
 
+系统级秘密默认不属于普通业务数据备份。
+
 ---
 
-# 107. 推荐备份方式
+## 106.1 “一键备份本系统数据”的含义
+
+后台：
+
+```text
+/admin/backup
+```
+
+提供：
+
+> 一键备份到 Google Drive
+
+按钮。
+
+默认备份：
+
+> 当前活动业务数据分区的完整业务数据。
+
+包括：
+
+* SQLite 业务数据库；
+* 所有有效附件和必要历史附件；
+* 数据分区元信息；
+* Backup Manifest。
+
+不包括：
+
+* 管理员密码；
+* TOTP Secret；
+* FMLYSYS_MASTER_KEY；
+* Google OAuth Token；
+* 微信 App Secret；
+* Session；
+* 服务器私有配置。
+
+---
+
+# 107. 标准备份文件格式
 
 提供 CLI：
 
@@ -3057,30 +3604,113 @@ uploads/
 fmlysys backup
 ```
 
-输出：
+以及后台备份功能。
+
+统一输出：
 
 ```text
 backup/
-└── fmlysys-20260821-xxxx.tar.gz
+└── fmlysys-backup-v1-20260821-xxxx.tar.gz
 ```
 
-包含：
+推荐内部结构：
 
 ```text
-database snapshot
-uploads
 manifest.json
+
+partition/
+├── fmlysys.db
+└── uploads/
+    ├── ...
+    └── ...
 ```
 
-Manifest 至少记录：
+所有本地备份、Google Drive 备份、外部导入均使用：
+
+> **同一 Backup Package 格式。**
+
+---
+
+## 107.1 Manifest
+
+`manifest.json` 至少记录：
 
 ```text
-系统版本
-数据库 schema 版本
-备份时间
-文件数量
-数据库 SHA-256
+backup_format_version
+
+backup_id
+
+partition_uuid
+partition_name
+
+fmlysys_version
+schema_version
+
+created_at
+
+database_file
+database_size
+database_sha256
+
+attachment_count
+attachment_total_size
+
+files
 ```
+
+`files` 可记录：
+
+```text
+relative_path
+size
+sha256
+```
+
+确保导入时能够验证：
+
+> 数据库和附件确实属于同一份完整备份。
+
+---
+
+## 107.2 备份包必须自描述
+
+备份文件不得依赖：
+
+* 原服务器绝对路径；
+* 原机器用户名；
+* Docker Container ID；
+* 当前 Partition 本地目录名；
+* 当前服务器 IP。
+
+只要 FmlySys 版本兼容：
+
+> Backup Package 应能够在另一套 FmlySys 实例中导入。
+
+---
+
+## 107.3 备份不包含系统秘密
+
+普通业务数据备份不得包含：
+
+```text
+system.db
+```
+
+中的系统秘密。
+
+特别包括：
+
+* 后台管理员密码 Hash；
+* 后台 TOTP Secret；
+* Google OAuth Token；
+* Google Drive Refresh Token；
+* Master Key；
+* 后台 Session；
+* 当前服务器配置密码。
+
+因此：
+
+> 导入一份家族业务备份不会同时复制另一套服务器的管理员权限。
 
 ---
 
@@ -3096,57 +3726,761 @@ Manifest 至少记录：
 * `VACUUM INTO`；
 * 或其他一致性快照方式。
 
-然后再与附件目录组成备份。
+标准过程：
+
+```text
+锁定目标数据分区备份上下文
+↓
+创建临时工作目录
+↓
+生成 SQLite 一致性 Snapshot
+↓
+收集对应 uploads
+↓
+生成 manifest.json
+↓
+计算 SHA-256
+↓
+生成 Backup Package
+↓
+重新验证 Backup Package
+↓
+备份完成
+```
+
+文件 IO 不应长时间占用 SQLite 写事务。
+
+备份过程中允许系统继续正常提供服务，但生成的数据库快照必须对应一个明确的一致性时间点。
 
 ---
 
-# 109. 恢复
+# 109. Google Drive 一键备份
 
-必须提供明确恢复流程。
+FmlySys V1 支持：
+
+> **一键备份当前系统业务数据到 Google Drive 云端硬盘。**
+
+入口：
+
+```text
+/admin/backup
+```
+
+管理员可以：
+
+1. 首次连接 Google Drive；
+2. 查看连接状态；
+3. 点击“一键备份到 Google Drive”；
+4. 查看备份进度；
+5. 查看成功/失败记录。
+
+---
+
+## 109.1 Google Drive 授权
+
+使用：
+
+> Google OAuth 2.0 + Google Drive API
+
+进行授权。
+
+授权仅由：
+
+> 后台管理员
+
+执行。
+
+OAuth 授权信息属于：
+
+> 系统级数据。
+
+不得保存到业务数据分区。
+
+---
+
+## 109.2 Google Drive Token
 
 例如：
 
 ```text
-停止 FmlySys
-↓
-备份当前数据
-↓
-恢复数据库
-↓
-恢复 uploads
-↓
-执行 integrity check
-↓
-启动
+access_token
+refresh_token
 ```
 
-后续可以建设：
+不得：
 
-```text
-fmlysys restore
-```
+* 写入日志；
+* 写入普通业务备份；
+* 返回普通成员页面；
+* 保存至浏览器 LocalStorage。
 
-但 restore 属于高风险操作，不能通过一个无二次确认的普通 Web 按钮直接执行。
+Refresh Token 等需要长期保存的敏感凭证，应：
+
+1. 保存于 `system.db`；
+2. 使用 `FMLYSYS_MASTER_KEY` 加密。
 
 ---
 
-# 110. SQLite 完整性检查
+## 109.3 Google Drive 备份目录
 
-管理员后台可以显示最近检查结果。
+系统可以在授权账号的 Google Drive 中创建专用目录：
 
-维护时至少支持：
+```text
+FmlySys Backups/
+```
+
+例如：
+
+```text
+FmlySys Backups/
+├── fmlysys-backup-v1-20260821-045000.tar.gz
+├── fmlysys-backup-v1-20260825-120000.tar.gz
+└── ...
+```
+
+每次备份默认：
+
+> 新建一个独立文件。
+
+不得默认覆盖之前的备份。
+
+---
+
+## 109.4 Google Drive 备份流程
+
+标准流程：
+
+```text
+管理员点击“一键备份到 Google Drive”
+↓
+确定当前活动数据分区
+↓
+产生 SQLite 一致性 Snapshot
+↓
+收集该分区 uploads
+↓
+生成 manifest
+↓
+创建 Backup Package
+↓
+执行本地完整性校验
+↓
+上传 Google Drive
+↓
+等待 Google Drive 确认成功
+↓
+记录远端文件 ID
+↓
+记录备份成功
+↓
+清理临时文件
+```
+
+---
+
+## 109.5 上传进度
+
+备份界面至少能够展示：
+
+```text
+正在准备数据库快照
+正在收集附件
+正在生成备份文件
+正在校验备份
+正在上传 Google Drive · 35%
+正在上传 Google Drive · 78%
+正在确认远端文件
+备份完成
+```
+
+---
+
+## 109.6 大备份文件
+
+随着：
+
+```text
+uploads/
+```
+
+增长，备份文件可能逐渐变大。
+
+Google Drive 上传实现应支持：
+
+> 可续传上传。
+
+网络短暂中断时尽可能继续原上传任务，而不是必须从零重新传输整个大文件。
+
+---
+
+## 109.7 Google Drive 备份记录
+
+`system.db` 建议建立：
+
+```text
+backup_records
+```
+
+至少记录：
+
+```text
+id
+
+backup_id
+partition_id
+
+destination
+
+file_name
+file_size
+sha256
+
+google_drive_file_id
+
+started_at
+completed_at
+
+status
+error_message
+
+created_by_admin_id
+```
+
+`destination` 至少包括：
+
+```text
+LOCAL
+GOOGLE_DRIVE
+```
+
+---
+
+## 109.8 Google Drive 失败边界
+
+以下情况：
+
+* Google Drive 未授权；
+* OAuth Token 失效；
+* 网络中断；
+* Google Drive 空间不足；
+* API 返回错误；
+* 上传后远端校验失败；
+
+必须将：
+
+> Google Drive 备份
+
+标记为失败。
+
+不得因为本地 Backup Package 已经生成，就显示：
+
+> 云端备份成功。
+
+Google Drive 备份失败不得：
+
+* 修改当前业务数据；
+* 修改公共财产；
+* 修改活动数据分区；
+* 导致 FmlySys 业务不可用。
+
+Google Drive 是：
+
+> 备份目的地。
+
+不是：
+
+> FmlySys 运行所依赖的数据库。
+
+---
+
+# 110. 外部备份导入与新数据分区
+
+系统支持管理员从：
+
+> 外部 FmlySys Backup Package
+
+导入数据。
+
+入口：
+
+```text
+/admin/data-partitions/import
+```
+
+但必须遵循一个不可改变的核心原则：
+
+> **导入备份永远不能覆盖当前原有数据分区。**
+
+导入的语义固定为：
+
+> **Import As New Partition / 导入为新的系统数据分区。**
+
+---
+
+## 110.1 导入示例
+
+当前系统：
+
+```text
+Partition A
+当前活动
+```
+
+管理员导入：
+
+```text
+backup-X.tar.gz
+```
+
+导入成功后：
+
+```text
+Partition A
+当前活动
+
+Partition B
+由 backup-X 导入
+```
+
+而不是：
+
+```text
+Partition A
+被 backup-X 覆盖
+```
+
+---
+
+## 110.2 导入过程
+
+标准流程：
+
+```text
+管理员选择备份文件
+↓
+上传至 data/temp/
+↓
+检查文件大小和格式
+↓
+安全解包至临时目录
+↓
+读取 manifest.json
+↓
+检查 Backup Format Version
+↓
+检查 FmlySys / Schema Version
+↓
+校验数据库 SHA-256
+↓
+校验附件 Hash
+↓
+执行 SQLite integrity_check
+↓
+需要时在新副本执行 Migration
+↓
+生成新的本地 partition_id
+↓
+移动至 partitions/<new_partition_id>/
+↓
+注册 data_partitions
+↓
+导入完成
+```
+
+所有步骤全部成功后：
+
+> 新数据分区才正式出现在系统中。
+
+---
+
+## 110.3 导入失败
+
+如果任何步骤失败：
+
+```text
+校验失败
+数据库损坏
+附件缺失
+Schema 不兼容
+解压失败
+磁盘空间不足
+Migration 失败
+```
+
+则：
+
+```text
+删除临时导入目录
+↓
+标记导入失败
+↓
+原系统继续运行
+```
+
+导入失败不得影响：
+
+* 当前活动数据库；
+* 当前附件；
+* 当前家族成员；
+* 当前公共财产；
+* 当前事务；
+* 当前审计历史。
+
+---
+
+## 110.4 导入后不得自动切换
+
+导入成功后：
+
+> 新数据分区默认处于非活动状态。
+
+系统提示：
+
+```text
+备份已成功导入为新的数据分区。
+
+当前数据未被覆盖，也未发生改变。
+```
+
+如果管理员希望使用新分区：
+
+> 需要再单独执行“切换数据分区”。
+
+即：
+
+```text
+Import
+```
+
+与：
+
+```text
+Switch
+```
+
+必须是两个不同操作。
+
+---
+
+## 110.5 同名分区
+
+如果备份中的名称与当前已有数据分区名称相同：
+
+> 仍然建立新的独立 Partition。
+
+例如：
+
+```text
+父亲遗产事务
+```
+
+已经存在。
+
+再次导入后可以显示：
+
+```text
+父亲遗产事务（导入 2026-08-21）
+```
+
+但底层必须生成新的：
+
+```text
+partition_id
+```
+
+---
+
+## 110.6 同一备份重复导入
+
+同一个：
+
+```text
+backup_id
+```
+
+原则上允许重复导入。
+
+系统可以提示：
+
+```text
+该备份此前已经导入过。
+继续操作将创建另一个独立数据分区。
+```
+
+管理员确认后：
+
+```text
+Partition B
+Partition C
+```
+
+可以同时存在。
+
+不得自动：
+
+* 覆盖 B；
+* 合并 B；
+* 删除 B。
+
+---
+
+## 110.7 Schema 兼容
+
+如果备份 Schema：
+
+> 低于当前程序支持版本
+
+则允许：
+
+```text
+在新分区副本执行 Migration
+```
+
+之后导入。
+
+不得修改用户上传的原 Backup Package。
+
+如果备份 Schema：
+
+> 高于当前程序支持版本
+
+则：
+
+> 拒绝导入。
+
+提示：
+
+```text
+该备份由较新版本 FmlySys 创建。
+请先升级本系统。
+```
+
+不得尝试“尽量兼容读取”。
+
+---
+
+## 110.8 SQLite 完整性检查
+
+导入时至少执行：
 
 ```sql
 PRAGMA integrity_check;
 ```
 
-备份恢复完成后必须能够执行完整性检查。
+只有返回：
+
+```text
+ok
+```
+
+才能注册为有效数据分区。
 
 ---
 
-# 111. 数据导出
+## 110.9 外部备份属于不可信输入
 
-后续应允许导出：
+即使扩展名正确，也必须防止：
+
+* 路径穿越；
+* `../`；
+* 绝对路径；
+* Symbolic Link；
+* 解压炸弹；
+* 异常巨大文件；
+* Manifest 欺骗；
+* Hash 不一致；
+* 未声明文件。
+
+所有解压内容必须限制在：
+
+```text
+data/temp/<import_operation_id>/
+```
+
+中。
+
+完成全部校验后才能移动至：
+
+```text
+data/partitions/
+```
+
+---
+
+# 111. 数据分区管理与恢复
+
+后台提供：
+
+```text
+/admin/data-partitions
+```
+
+至少显示：
+
+```text
+分区名称
+分区 ID
+当前活动状态
+
+来源
+创建时间
+导入时间
+
+FmlySys Version
+Schema Version
+
+数据库大小
+附件数量
+附件大小
+
+最近使用时间
+```
+
+---
+
+## 111.1 切换数据分区
+
+只有管理员可以切换活动数据分区。
+
+流程：
+
+```text
+当前活动：Partition A
+↓
+管理员选择 Partition B
+↓
+显示切换确认
+↓
+关闭/释放旧业务数据库连接
+↓
+激活 Partition B
+↓
+更新 system.db
+↓
+使普通成员 Session 失效
+↓
+后续请求进入 Partition B
+```
+
+切换操作必须记录：
+
+> system_audit_logs。
+
+---
+
+## 111.2 切换不等于复制
+
+切换数据分区：
+
+* 不复制数据；
+* 不删除数据；
+* 不合并数据；
+* 不改变其他 Partition。
+
+只是改变：
+
+> 当前 `/` 使用哪一套业务数据。
+
+---
+
+## 111.3 删除数据分区
+
+删除整个数据分区属于：
+
+> 高风险操作。
+
+V1 可以不提供 Web 删除功能。
+
+如果以后提供：
+
+1. 当前活动分区不能直接删除；
+2. 必须二次确认；
+3. 明确提示数据库和附件都将被删除；
+4. 推荐删除前创建备份；
+5. 必须写系统 Audit。
+
+---
+
+## 111.4 普通导入与灾难恢复必须区分
+
+后台：
+
+```text
+导入外部备份
+```
+
+固定语义是：
+
+```text
+Backup
+→
+New Partition
+```
+
+不是：
+
+```text
+Backup
+→
+Overwrite Current Partition
+```
+
+如果服务器发生完全损坏，需要从备份重建：
+
+> 属于 Disaster Recovery。
+
+以后可由 CLI：
+
+```text
+fmlysys restore
+```
+
+负责。
+
+但普通 Web 后台：
+
+> 不提供“一键覆盖当前数据”的 Restore。
+
+---
+
+## 111.5 Google Drive 备份也可作为外部备份来源
+
+Google Drive 中的备份文件与本地标准备份文件格式一致。
+
+管理员可以：
+
+```text
+从 Google Drive 下载备份
+↓
+上传到 FmlySys
+↓
+导入为新的 Partition
+```
+
+V1 不强制实现：
+
+> 在 FmlySys 后台直接浏览 Google Drive 文件并导入。
+
+第一阶段只要求：
+
+1. 一键备份到 Google Drive；
+2. 从外部备份文件导入新数据分区。
+
+未来可以再增加：
+
+```text
+从 Google Drive 选择备份
+↓
+直接导入为新分区
+```
+
+功能。
+
+---
+
+# 112. 数据导出与其他数据导入
+
+业务数据导出仍可以支持：
 
 * 公共资产流水；
 * 消费记录；
@@ -3165,16 +4499,44 @@ PDF 报告不是核心技术要求。
 
 ---
 
-# 112. 数据导入
+## 112.1 Backup Import 与普通数据导入不是同一个概念
 
-V1 不提供通用：
+必须明确区分：
 
-> 任意 CSV 自动导入所有业务数据。
+### Backup Import
+
+输入：
+
+```text
+FmlySys Backup Package
+```
+
+结果：
+
+```text
+创建新的完整数据分区
+```
+
+属于 V1 核心能力。
+
+### Business Data Import
+
+例如：
+
+```text
+CSV
+JSON
+Excel
+```
+
+导入若干业务记录。
+
+V1 不提供万能业务导入器。
 
 初始历史数据如果需要批量迁移，应通过：
 
 * 专用迁移脚本；
-* 或管理员导入工具；
+* 或管理员专项导入工具；
 
 按具体数据格式开发。
 
@@ -3198,7 +4560,7 @@ V1 不提供通用：
 目标 < 500 ms
 ```
 
-附件上传/下载除外。
+附件上传/下载、备份、Google Drive 上传和外部备份导入除外。
 
 不为了：
 
@@ -3212,7 +4574,7 @@ V1 不提供通用：
 
 # 114. 数据规模预期
 
-SQLite 应能够轻松覆盖：
+每个业务数据分区中的 SQLite 应能够轻松覆盖：
 
 * 数十名成员；
 * 数万条财务记录；
@@ -3225,6 +4587,8 @@ SQLite 应能够轻松覆盖：
 
 因此附件不放 SQLite BLOB。
 
+多个数据分区可以共存，但当前系统不要求同时为多个分区提供高并发访问。
+
 ---
 
 # 115. 分页
@@ -3236,7 +4600,9 @@ SQLite 应能够轻松覆盖：
 * Audit；
 * 档案；
 * 家族事务；
-* 附件列表。
+* 附件列表；
+* 备份记录；
+* 数据分区数量较多时的数据分区列表。
 
 默认：
 
@@ -3271,6 +4637,10 @@ LIKE
 
 > SQLite FTS5。
 
+搜索始终限定：
+
+> 当前活动数据分区。
+
 ---
 
 # 117. 定时任务
@@ -3280,6 +4650,8 @@ V1 如需要：
 * 提醒生成；
 * Session 清理；
 * 临时文件清理；
+* 失败备份临时目录清理；
+* 失败导入临时目录清理；
 
 可在 Go 单体应用内运行轻量 Scheduler。
 
@@ -3290,6 +4662,22 @@ V1 如需要：
 * 独立 Worker 集群。
 
 重要业务状态不能只存在内存 Scheduler 中。
+
+V1 要求：
+
+> Google Drive 一键手工备份。
+
+不要求自动定时云备份。
+
+以后可以再增加：
+
+```text
+每日
+每周
+每月
+```
+
+自动备份计划。
 
 ---
 
@@ -3302,11 +4690,21 @@ V1 如需要：
 ↓
 检查 Data Directory
 ↓
-打开 SQLite
+打开 system.db
 ↓
 设置 PRAGMA
 ↓
-执行 Migration
+执行 System Migration
+↓
+读取 Active Partition
+↓
+检查 Active Partition 目录
+↓
+打开 Active Partition fmlysys.db
+↓
+设置 PRAGMA
+↓
+执行 Partition Migration
 ↓
 验证管理员配置
 ↓
@@ -3320,6 +4718,8 @@ V1 如需要：
 > 服务直接退出。
 
 不得在数据库不可正常使用时仍启动一个半残系统。
+
+非活动数据分区原则上不要求启动时全部打开。
 
 ---
 
@@ -3336,9 +4736,12 @@ SIGINT
 
 * 停止接受新请求；
 * 等待进行中请求；
+* 停止新的备份/导入任务；
+* 妥善处理中途任务状态；
 * 结束后台任务；
 * Flush Log；
-* 正常关闭数据库。
+* 正常关闭活动业务数据库；
+* 正常关闭 `system.db`。
 
 ---
 
@@ -3368,15 +4771,38 @@ config/
 
 如果提供 Docker：
 
-SQLite 和附件目录必须挂载持久卷：
+完整：
 
 ```text
 /data
 ```
 
-不得把数据库保存在：
+必须挂载持久卷。
 
-> 容器临时文件系统。
+其中包括：
+
+```text
+system.db
+partitions/
+backup/
+```
+
+不得只持久化当前活动：
+
+```text
+fmlysys.db
+```
+
+而遗漏其他数据分区。
+
+不得把：
+
+* 数据库；
+* 附件；
+* 数据分区；
+* 本地备份；
+
+保存在容器临时文件系统。
 
 ---
 
@@ -3385,7 +4811,7 @@ SQLite 和附件目录必须挂载持久卷：
 第一阶段不支持：
 
 ```text
-两个 FmlySys 实例同时读写同一个 SQLite
+两个 FmlySys 实例同时读写同一个数据目录
 ```
 
 标准部署为：
@@ -3394,7 +4820,7 @@ SQLite 和附件目录必须挂载持久卷：
 
 如果未来需要多实例：
 
-> 再评估数据库迁移到 PostgreSQL。
+> 再评估数据库迁移到 PostgreSQL 或重新设计数据层。
 
 当前不提前建设。
 
@@ -3415,7 +4841,13 @@ SQLite 和附件目录必须挂载持久卷：
 * 修改旧消费后的余额重算；
 * 撤销；
 * 退款；
-* 财务一致性。
+* 财务一致性；
+* 数据分区解析；
+* Backup Manifest；
+* Backup Hash；
+* 导入校验；
+* Partition 切换；
+* Google Drive 备份状态机。
 
 ---
 
@@ -3474,6 +4906,8 @@ A+B = 48,000
 净额 = 48,000
 ```
 
+这些计算必须只发生在同一数据分区。
+
 ---
 
 # 125. 修改历史测试
@@ -3527,15 +4961,20 @@ A+B = 48,000
 * 无权限成员不能读取敏感附件；
 * 禁用成员 Session 失效；
 * 后台 TOTP 错误不能登录；
-* CSRF 缺失不能修改数据。
+* CSRF 缺失不能修改数据；
+* 普通成员不能切换 Partition；
+* 普通成员不能导入备份；
+* 普通成员不能操作 Google Drive；
+* 非活动分区数据不能通过修改 URL 越权读取；
+* 切换数据分区后旧普通成员 Session 失效。
 
 ---
 
-# 128. SQLite 集成测试
+# 128. SQLite 与备份集成测试
 
 集成测试建议直接创建：
 
-> 临时 SQLite 数据库。
+> 临时 system.db + 多个临时 Partition SQLite 数据库。
 
 真实执行：
 
@@ -3544,9 +4983,41 @@ A+B = 48,000
 * Update；
 * Transaction；
 * Foreign Key；
-* Recalculation。
+* Recalculation；
+* 创建 Snapshot；
+* 打包附件；
+* 生成 Manifest；
+* Hash 校验；
+* 导入备份；
+* 新 Partition 注册；
+* 数据分区切换；
+* SQLite integrity_check。
 
 避免核心财务逻辑只 Mock 数据库。
+
+同时必须覆盖：
+
+### Partition Import Case
+
+```text
+当前 Partition A
+↓
+创建 A 的 Backup Package
+↓
+重新导入 Backup Package
+↓
+产生 Partition B
+```
+
+验证：
+
+```text
+A 完全不变
+B 数据完整
+A/B path 不相同
+A/B database 不相同
+A/B uploads 不相同
+```
 
 ---
 
@@ -3554,17 +5025,34 @@ A+B = 48,000
 
 建议按以下顺序开发。
 
-## Phase 1：技术骨架
+## Phase 1：技术骨架与数据分区
 
 * Go 项目；
 * 配置；
+* `system.db`；
+* Data Partition；
+* 默认 Partition；
 * SQLite；
-* Migration；
+* System Migration；
+* Partition Migration；
+* PartitionManager；
 * HTTP Router；
 * Template；
 * Static；
 * Audit 基础；
 * Session 基础。
+
+数据分区应在业务开发早期确定。
+
+不要先把整个系统写死成：
+
+```text
+data/fmlysys.db
+```
+
+后期再强行改造成多分区。
+
+---
 
 ## Phase 2：后台
 
@@ -3572,14 +5060,20 @@ A+B = 48,000
 * Password；
 * Google Authenticator；
 * 成员管理；
-* 权限。
+* 权限；
+* 数据分区基础管理页面。
+
+---
 
 ## Phase 3：普通成员身份
 
 * 微信认证抽象；
 * 微信登录；
 * Join Request；
-* 审核。
+* 审核；
+* Session 与 Partition 绑定。
+
+---
 
 ## Phase 4：公共财产核心
 
@@ -3594,12 +5088,17 @@ A+B = 48,000
 * 动态余额；
 * 一致性检查。
 
+---
+
 ## Phase 5：附件
 
 * 图片；
 * 票据；
 * PDF；
-* 权限读取。
+* 权限读取；
+* Partition 独立 uploads。
+
+---
 
 ## Phase 6：事务
 
@@ -3609,6 +5108,8 @@ A+B = 48,000
 * 参与人；
 * 财务关联。
 
+---
+
 ## Phase 7：遗产
 
 * 遗产事项；
@@ -3616,7 +5117,37 @@ A+B = 48,000
 * 分配；
 * 划入公共财产。
 
-## Phase 8：长期能力
+---
+
+## Phase 8：备份与数据分区导入
+
+* SQLite 一致性 Snapshot；
+* Backup Package；
+* Manifest；
+* SHA-256 校验；
+* 本地备份；
+* 外部备份上传；
+* Safe Extract；
+* Integrity Check；
+* Import As New Partition；
+* Partition Switch。
+
+---
+
+## Phase 9：Google Drive
+
+* Google OAuth；
+* Token 加密保存；
+* Drive 文件上传；
+* 可续传上传；
+* 一键备份；
+* 上传进度；
+* Backup Records；
+* 失败恢复和错误提示。
+
+---
+
+## Phase 10：长期能力
 
 * 首页聚合；
 * 时间轴；
@@ -3651,7 +5182,12 @@ A+B = 48,000
 * 多区域部署；
 * 多实例 SQLite 集群；
 * 对外开放 API；
-* 对公众开放注册。
+* 对公众开放注册；
+* 两个数据分区自动合并；
+* 外部 Backup 自动覆盖当前数据；
+* 根据姓名自动识别跨 Partition 同一成员；
+* 自动周期 Google Drive 备份；
+* 在 Google Drive 上直接运行 FmlySys 数据库。
 
 ---
 
@@ -3762,6 +5298,12 @@ FmlySys 不调用：
 上传支付凭证
 ```
 
+Google Drive API 只用于：
+
+> 系统数据备份。
+
+不得扩展为资金、账单或私人金融账户同步能力。
+
 ---
 
 # 135. 系统不作为法律确权系统
@@ -3802,31 +5344,71 @@ Audit 的目标：
 
 > 外部签名备份或 Hash Chain。
 
+Google Drive 备份属于：
+
+> 异地备份。
+
+不应被宣传成不可篡改存证。
+
 ---
 
 # 137. 数据长期可迁移原则
 
-数据库使用 SQLite。
+业务数据库使用：
 
-附件使用普通文件。
+> SQLite。
 
-配置使用通用文本格式。
+附件使用：
+
+> 普通文件。
+
+备份使用：
+
+> 标准自描述 Backup Package。
+
+配置使用：
+
+> 通用文本格式。
 
 必须避免把核心数据绑定到：
 
 > 某个云厂商私有服务。
 
-长期目标：
+长期目标是：
 
 ```text
+一个业务数据分区：
+
 SQLite DB
 +
 uploads
-+
-配置
 ```
 
-即可完整迁移 FmlySys。
+可以被打包成为：
+
+```text
+Backup Package
+```
+
+然后：
+
+```text
+导入另一台 FmlySys
+↓
+创建新的 Data Partition
+↓
+继续使用
+```
+
+即使 Google Drive 不再使用：
+
+> 本地备份、迁移和恢复能力仍然存在。
+
+Google Drive 只是：
+
+> 可选的异地备份目的地。
+
+不是数据格式本身。
 
 ---
 
@@ -3846,6 +5428,8 @@ Transfer
 Matter
 Estate
 Audit
+Data Partition
+Backup
 ```
 
 这些术语必须在：
@@ -3867,7 +5451,16 @@ money_holder
 keeper
 ```
 
-导致长期语义混乱。
+或者将：
+
+```text
+Import
+Restore
+Merge
+Switch
+```
+
+混为一谈。
 
 ---
 
@@ -3888,6 +5481,10 @@ Decision
 Archive
 Attachment
 AuditLog
+
+DataPartition
+BackupPackage
+BackupRecord
 ```
 
 中文界面可分别显示：
@@ -3905,7 +5502,21 @@ AuditLog
 家族档案
 附件
 操作记录
+
+数据分区
+备份文件
+备份记录
 ```
+
+备份相关操作统一使用：
+
+```text
+备份
+导入
+切换
+```
+
+三个不同概念。
 
 ---
 
@@ -3984,6 +5595,72 @@ FmlySys 的长期价值主要存在于数据库和家族档案，而不是代码
 > 为什么修改；
 > 当时对应什么家族事务。
 
+### 15. 数据分区必须真正隔离
+
+每个业务数据分区使用：
+
+```text
+独立 SQLite
++
+独立 uploads
+```
+
+不得依靠在所有业务表中添加 `partition_id` 模拟隔离。
+
+### 16. 外部备份导入永远新增分区
+
+普通后台导入不存在：
+
+> 覆盖当前系统数据
+
+这一语义。
+
+固定为：
+
+```text
+Backup Package
+→
+New Data Partition
+```
+
+### 17. 导入与切换必须分离
+
+成功导入备份后：
+
+> 当前活动数据分区不变。
+
+只有管理员单独执行：
+
+> 切换数据分区
+
+后才进入新数据。
+
+### 18. Google Drive 是备份目的地
+
+Google Drive 故障不得影响：
+
+> FmlySys 正常业务运行。
+
+### 19. 云备份不得携带系统秘密
+
+普通业务数据备份不得包含：
+
+* 管理员密码；
+* TOTP；
+* Google OAuth Token；
+* Master Key；
+* Session。
+
+### 20. 备份必须可移植、可验证
+
+每个 Backup Package 必须：
+
+* 自描述；
+* 可执行 Hash 校验；
+* 可执行数据库完整性检查；
+* 不依赖原服务器绝对路径；
+* 可以导入另一套兼容版本 FmlySys。
+
 ---
 
 # 141. 第一版完成判定
@@ -3994,6 +5671,8 @@ FmlySys 的长期价值主要存在于数据库和家族档案，而不是代码
 管理员初始化
 ↓
 Google Authenticator 登录 /admin
+↓
+建立默认 Data Partition
 ↓
 建立家族成员
 ↓
@@ -4029,9 +5708,37 @@ Audit 能完整还原修改过程
 ↓
 无权限成员无法读取敏感附件
 ↓
-完整备份 SQLite + 附件
+创建 SQLite 一致性 Snapshot
 ↓
-可从备份恢复系统
+完整打包当前 Partition 的 SQLite + uploads + manifest
+↓
+Backup Package 完整性校验通过
+↓
+管理员连接 Google Drive
+↓
+点击“一键备份到 Google Drive”
+↓
+云端备份成功并保存远端文件 ID
+↓
+将一个外部 Backup Package 上传到系统
+↓
+系统校验 Manifest / Hash / SQLite
+↓
+外部 Backup 被导入为新的 Partition B
+↓
+原 Partition A 数据完全没有变化
+↓
+Partition B 默认不自动激活
+↓
+管理员主动切换到 Partition B
+↓
+旧普通成员 Session 失效
+↓
+Partition B 的成员、财务、事务、附件均可独立使用
+↓
+管理员重新切换回 Partition A
+↓
+Partition A 内容与导入前完全一致
 ```
 
 以上链路是第一阶段最重要的验收基线。
@@ -4043,5 +5750,7 @@ Audit 能完整还原修改过程
 * 医疗备忘；
 * 家谱；
 * 更多提醒方式；
+* Google Drive 直接选择备份导入；
+* 自动周期云端备份；
 * OCR；
 * 其他高级功能。
