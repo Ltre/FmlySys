@@ -233,3 +233,53 @@ go run ./cmd/fmlysys
 ```
 
 并完成真实 SQLite CRUD 冒烟测试。
+
+## 10. Windows 本地代理启动脚本
+
+为方便 Windows 本地开发环境在需要代理时直接运行 FmlySys，新增：
+
+```text
+scripts/dev-windows.cmd
+```
+
+脚本在当前进程内临时设置：
+
+```text
+HTTP_PROXY=http://127.0.0.1:58591
+HTTPS_PROXY=http://127.0.0.1:58591
+ALL_PROXY=socks5://127.0.0.1:51837
+```
+
+同时设置对应的小写代理变量，提高不同命令行工具的兼容性，并设置：
+
+```text
+NO_PROXY=127.0.0.1,localhost
+```
+
+避免本地访问 FmlySys 时经过代理。
+
+脚本使用 Windows `setlocal`，因此上述代理变量、`FMLYSYS_ADDR`、`FMLYSYS_DATA_DIR` 等都只对本次脚本及其子进程有效；脚本退出后自动恢复调用脚本前的环境，不写入 Windows 用户环境变量或系统环境变量。
+
+考虑到当前 Step1 尚未接入正式登录认证，脚本明确设置：
+
+```text
+FMLYSYS_ADDR=127.0.0.1:8080
+```
+
+禁止开发启动脚本默认监听所有网卡。
+
+脚本还会：
+
+1. 自动切换工作目录到仓库根目录；
+2. 将数据目录设为仓库根目录下的 `data`；
+3. 检查 `go.exe` 是否已经加入 `PATH`；
+4. 执行 `go run ./cmd/fmlysys`；
+5. 将 Go 程序退出码原样返回。
+
+Windows 本地使用方式：
+
+```bat
+scripts\dev-windows.cmd
+```
+
+由于代理仅为运行时临时环境，用户无需为测试 FmlySys 永久修改 Windows 的 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`。
