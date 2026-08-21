@@ -1,100 +1,80 @@
 package store
 
 type Member struct {
-	ID       int64
-	Name     string
-	Relation string
+	ID             int64
+	Name, Relation string
 }
-
 type AssetSummary struct {
-	NetCent         int64
-	HolderTotalCent int64
-	PendingCent     int64
-	DifferenceCent  int64
-	Holders         []HolderBalance
+	NetCent, HolderTotalCent, PendingCent, DifferenceCent int64
+	Holders                                               []HolderBalance
 }
-
 type HolderBalance struct {
 	MemberID int64
 	Name     string
 	Cent     int64
 }
-
 type AssetEvent struct {
-	ID          int64
-	Type        string
-	AmountCent  int64
-	HolderName  string
-	Description string
-	OccurredAt  string
+	ID                                  int64
+	Type                                string
+	AmountCent                          int64
+	HolderName, Description, OccurredAt string
+	RelatedEventID                      int64
+	RelatedLabel                        string
 }
-
+type AssetInflowOption struct {
+	ID                                        int64
+	HolderID                                  int64
+	HolderName, Type, Description, OccurredAt string
+	AmountCent                                int64
+}
 type Transfer struct {
-	ID             int64
-	FromName       string
-	ToName         string
-	AmountCent     int64
-	Purpose        string
-	PaymentChannel string
-	OccurredAt     string
-	MatterTitle    string
+	ID                                               int64
+	FromName, ToName                                 string
+	AmountCent                                       int64
+	Purpose, PaymentChannel, OccurredAt, MatterTitle string
+	Evidence                                         []Evidence
 }
-
 type Reimbursement struct {
-	ID             int64
-	ExpenseTitle   string
-	HolderName     string
-	ReceiverName   string
-	AmountCent     int64
-	PaymentChannel string
-	OccurredAt     string
+	ID                                     int64
+	ExpenseID                              int64
+	ExpenseTitle, HolderName, ReceiverName string
+	AmountCent                             int64
+	PaymentChannel, OccurredAt, Note       string
+	Evidence                               []Evidence
 }
-
 type Expense struct {
-	ID               int64
-	Title            string
-	Category         string
-	AmountCent       int64
-	OccurredAt       string
-	FundingType      string
-	PayerName        string
-	HolderName       string
-	ReimbursableCent int64
-	ReimbursedCent   int64
-	PendingCent      int64
-	Description      string
-	PaymentChannel   string
-	Merchant         string
-	MatterTitle      string
+	ID                                                 int64
+	Title, Category                                    string
+	AmountCent                                         int64
+	OccurredAt, FundingType, PayerName, HolderName     string
+	ReimbursableCent, ReimbursedCent, PendingCent      int64
+	Description, PaymentChannel, Merchant, MatterTitle string
+	Evidence                                           []Evidence
 }
-
+type AuditLog struct {
+	ID                                                        int64
+	ActorName, Action, BeforeJSON, AfterJSON, Reason, CreatedAt string
+}
+type Evidence struct {
+	ID                     int64
+	EntityType             string
+	EntityID               int64
+	OriginalName, MimeType string
+	Size                   int64
+}
 type Matter struct {
-	ID          int64
-	ParentID    *int64
-	ParentTitle string
-	Title       string
-	Type        string
-	Description string
-	Status      string
-	StartDate   string
-	DueDate     string
-	OwnerName   string
-	ExpenseCent int64
+	ID                                                                           int64
+	ParentID                                                                     *int64
+	ParentTitle, Title, Type, Description, Status, StartDate, DueDate, OwnerName string
+	ExpenseCent                                                                  int64
 }
-
 type Archive struct {
-	ID          int64
-	Title       string
-	Category    string
-	Content     string
-	Visibility  string
-	CreatedAt   string
-	Attachments []Attachment
+	ID                                              int64
+	Title, Category, Content, Visibility, CreatedAt string
+	Attachments                                     []Attachment
 }
-
 type Attachment struct {
-	ID           int64
-	OriginalName string
-	MimeType     string
-	Size         int64
+	ID                     int64
+	OriginalName, MimeType string
+	Size                   int64
 }
