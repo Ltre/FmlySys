@@ -293,3 +293,25 @@ go mod verify
 首次成功运行后，本地工作区会生成 `go.sum`。该文件属于正常的 Go Module 依赖锁定/校验文件，后续应在有真实网络依赖解析结果后纳入仓库，以使其他机器不再依赖首次运行时生成。
 
 当前远端执行环境仍不能访问 Go Module 网络，因此没有伪造或手工填写任何 checksum；真实 `go.sum` 由用户本地 Go 工具链通过代理生成。
+
+## 12. Windows 启动脚本工作目录无关化
+
+为保证开发启动脚本既可以从仓库根目录执行 `scripts\dev-windows.cmd`，也可以进入 `scripts` 目录后直接执行或双击运行，脚本不再依赖调用者当前工作目录。
+
+脚本现在通过 `%~dp0` 获取 `dev-windows.cmd` 自身所在目录，再规范化得到仓库根目录 `REPO_ROOT`，并在切换目录前检查 `REPO_ROOT\go.mod` 是否存在。数据目录也直接绑定为 `REPO_ROOT\data`。
+
+因此以下启动方式使用同一套路径解析逻辑：
+
+```text
+# 位于仓库根目录
+scripts\dev-windows.cmd
+
+# 位于 scripts 目录
+cd scripts
+dev-windows.cmd
+
+# Windows 资源管理器
+双击 scripts\dev-windows.cmd
+```
+
+该调整避免脚本因 CMD / PowerShell 当前目录或资源管理器双击启动时的工作目录不同而错误定位 `go.mod`、`data` 或 `cmd/fmlysys`。

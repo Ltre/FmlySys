@@ -20,14 +20,25 @@ set "no_proxy=%NO_PROXY%"
 rem Step1 has no production authentication yet, so only listen on localhost.
 set "FMLYSYS_ADDR=127.0.0.1:8080"
 
-pushd "%~dp0.." >nul
-if errorlevel 1 (
-    echo [FmlySys] Failed to enter repository root.
+rem Resolve the repository root from this script's own location, never from the caller's current directory.
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..") do set "REPO_ROOT=%%~fI"
+
+if not exist "%REPO_ROOT%\go.mod" (
+    echo [FmlySys] Repository root could not be resolved from: %SCRIPT_DIR%
+    echo [FmlySys] Expected file not found: %REPO_ROOT%\go.mod
     endlocal
     exit /b 1
 )
 
-set "FMLYSYS_DATA_DIR=%CD%\data"
+pushd "%REPO_ROOT%" >nul
+if errorlevel 1 (
+    echo [FmlySys] Failed to enter repository root: %REPO_ROOT%
+    endlocal
+    exit /b 1
+)
+
+set "FMLYSYS_DATA_DIR=%REPO_ROOT%\data"
 if not defined FMLYSYS_DEV_MEMBER set "FMLYSYS_DEV_MEMBER=Dev Admin"
 
 where go >nul 2>&1
@@ -39,6 +50,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
+echo [FmlySys] Repository root: %REPO_ROOT%
 echo [FmlySys] HTTP_PROXY=%HTTP_PROXY%
 echo [FmlySys] HTTPS_PROXY=%HTTPS_PROXY%
 echo [FmlySys] ALL_PROXY=%ALL_PROXY%
