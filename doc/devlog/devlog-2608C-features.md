@@ -283,7 +283,9 @@ scripts\dev-windows.cmd
 
 并实际完成：初始资产 → 资产新增 → 部分公共资产消费/自动待报销 → 成员转账 → 报销 → 凭证下载 → 消费审计的完整 SQLite 冒烟测试。
 
-## 13. 仍未完成的生产边界
+## 13. 当时仍未完成的生产边界
+
+以下条目记录的是上一轮结束时的状态，其中微信成员认证和后台 TOTP 已在后续第 14 节完成：
 
 - 微信正式成员身份与加入审核；
 - `/admin` 管理员密码 + Google Authenticator TOTP；
@@ -295,4 +297,130 @@ scripts\dev-windows.cmd
 - 提醒；
 - 备份包、Google Drive、外部备份导入及 Partition 切换。
 
-因此当前分支仍是本地开发阶段，不应直接暴露到公网。
+## 14. 微信成员认证、Pending 审核、权限与后台 TOTP
+
+### 14.1 前台成员身份
+
+本轮将前台从开发态固定 `ActorID` 切换为服务器端成员 Session。正式页面 `/`、`/assets`、`/matters`、`/share` 均要求有效成员 Session；本地开发仅在 `FMLYSYS_DEV_AUTH_ENABLED=1` 时提供显式“本地开发身份登录”，正式部署必须关闭。
+
+微信网站扫码流程使用开放平台 `snsapi_login`：
+
+```text
+/login/wechat
+→ 微信扫码授权
+→ /auth/wechat/callback
+→ 已绑定 member_id：创建成员 Session
+→ 未绑定：进入 /join
+```
+
+OAuth 使用随机 `state` Cookie 校验，AppSecret 仅保留在服务端环境变量。微信身份与业务成员分离：业务表继续只引用内部 `member_id`。
+
+### 14.2 Pending 加入家族
+
+新增业务分区表：
+
+```text
+wechat_identities
+join_requests
+member_permissions
+member_sessions
+```
+
+未知微信身份不会直接看到家族数据，而是获得短期 join token，填写真实姓名与关系后进入 `pending`。后台 `/admin` 显示 Pending 列表，管理员可以：
+
+- 绑定到已有成员；或
+- 新建成员；
+- 同时勾选该成员权限；
+- 审核通过或拒绝。
+
+审核通过后 `wechat_identities.member_id` 指向内部成员；用户重新扫码即可创建正式 Session。拒绝后允许用户再次扫码并重新提交。
+
+### 14.3 成员权限
+
+当前权限粒度：
+
+```text
+assets.view
+assets.self_change
+expenses.create
+expenses.edit
+transfers.create
+reimbursements.create
+matters.view
+matters.manage
+share.view
+share.manage
+```
+
+后台既可在审核 Pending 时设置权限，也可后续对已有成员修改权限。权限在每次请求时从数据库读取，不把权限长期固化进 Cookie，因此后台修改后无需用户重新登录即可生效。
+
+前台不仅隐藏无权限控件，服务端路由也执行权限检查。普通成员新增公共消费时，经手人/付款人由当前成员 Session 强制绑定，不能通过篡改表单指定他人。`admin` 可见共享资料不再通过普通成员路径返回或下载。
+
+### 14.4 公共资产页面
+
+恢复公开的“公共资产持有人”列表，展示各成员当前代管公共财产总额；仍不展示任何个人真实银行卡、微信、支付宝或现金账户明细。
+
+“我的公共资产变动”从独立大区块改为持有人列表右上角的“登记我的资产变动”折叠入口：桌面端展开为列表角落浮层，移动端展开为正常块级面板，明确提示该入口只用于公共资产流入/退出，不是公共消费。
+
+### 14.5 多文件凭证
+
+再次确认前台三处均使用 `multipart/form-data + multiple`，后端 `ParseMultipartForm` 后读取同名 `evidence` 的全部 `FileHeader`，并逐个交给 `SaveEvidenceFiles` 保存：
+
+- 新增公共消费：支付凭证；
+- 与其他成员转账：转账凭证；
+- 登记报销：转账凭证。
+
+保持单文件 10MB、一次最多 20 个文件以及既有图片/办公文档白名单。请求解析上限提高到 220MB，避免 20 个接近 10MB 的合法文件在 multipart 解析阶段被过早拒绝。
+
+### 14.6 后台管理员密码 + Google Authenticator
+
+新增 system.db 表：
+
+```text
+admin_users
+admin_sessions
+```
+
+首次管理员不提供匿名 Web setup 页面。若 system.db 尚无管理员，可通过：
+
+```text
+FMLYSYS_ADMIN_USERNAME
+FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD
+```
+
+在启动时创建。密码验证成功后：首次进入 TOTP 绑定流程，服务端生成 160-bit Base32 Secret，并生成 `otpauth://` URI 与本地二维码；绑定完成后，以后每次后台登录均为“密码 → Google Authenticator 6 位 TOTP → authenticated session”。
+
+TOTP 实现遵循 RFC 6238：HMAC-SHA1、6 位、30 秒 timestep、允许 ±1 timestep 时钟漂移，并记录最后成功 timestep 防止同一验证码重放。TOTP Secret 使用 AES-256-GCM 加密后存入 system.db；主密钥来自 `FMLYSYS_MASTER_KEY`，未配置时自动生成 `data/system.key`。
+
+后台 Session 与普通成员 Session 使用不同 Cookie 与不同数据库，互不混用。
+
+### 14.7 新 migration 与依赖
+
+新增：
+
+```text
+migrations/partition/000003_member_auth_permissions.sql
+migrations/system/000002_admin_auth.sql
+```
+
+均为增量 migration，不要求删除现有 `data`。
+
+Google Authenticator 绑定二维码由 `github.com/skip2/go-qrcode` 在服务端本地生成，不依赖第三方在线二维码服务；对应模块校验已加入 `go.sum`。
+
+### 14.8 本轮验证与剩余边界
+
+已检查/验证：
+
+- 微信 OAuth state、code 换身份及 Pending 状态机代码路径；
+- 成员 Session 使用随机 256-bit token，数据库只保存 SHA-256 token hash；
+- TOTP 使用 RFC 6238 官方测试向量；
+- TOTP 重放拒绝；
+- 后台密码 hash/verify 单元测试；
+- 两个新增 SQLite migration 的建表/索引结构；
+- 三处凭证均为多文件 HTML 控件并贯通现有多文件后端；
+- 后台 Pending/成员权限页面与服务端 handler 字段一致；
+- 无权限的事务管理、消费编辑、报销操作在 UI 与路由两层收口。
+
+真实微信扫码仍必须在用户自己的微信开放平台网站应用、已审核回调域名以及真实 AppID/AppSecret 下做端到端测试。本地 `localhost` 只能测试 dev login、权限、Pending 数据层和后台 TOTP。
+
+仍未完成的生产级安全/功能边界包括 CSRF token、登录限流/锁定策略、更完整的安全日志、资产事件/转账/报销修改撤销 UI、遗产、提醒、备份/Google Drive/数据分区切换等；因此当前 Step1 仍应先在受控环境测试后再决定部署范围。

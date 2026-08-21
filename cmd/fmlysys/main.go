@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Ltre/FmlySys/internal/adminauth"
 	"github.com/Ltre/FmlySys/internal/config"
 	"github.com/Ltre/FmlySys/internal/httpserver"
 	"github.com/Ltre/FmlySys/internal/partition"
@@ -23,12 +24,28 @@ func main() {
 		log.Fatal(err)
 	}
 	defer pm.Close()
+
 	st := store.New(pm.ActiveDB)
-	actorID, err := st.EnsureDevMember(ctx, cfg.DevMember)
+	devActorID, err := st.EnsureDevMember(ctx, cfg.DevMember)
 	if err != nil {
 		log.Fatal(err)
 	}
-	app, err := httpserver.New(pm, st, actorID)
+	if cfg.DevAuthEnabled {
+		if err := st.GrantAllPermissions(ctx, devActorID); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	masterKey, err := adminauth.LoadMasterKey(cfg.DataDir, cfg.MasterKey)
+	if err != nil {
+		log.Fatal(err)
+	}
+	admin := adminauth.New(pm.SystemDB, masterKey)
+	if err := admin.EnsureBootstrapAdmin(ctx, cfg.AdminUsername, cfg.AdminBootstrapPassword); err != nil {
+		log.Fatal(err)
+	}
+
+	app, err := httpserver.New(pm, st, admin, cfg, devActorID)
 	if err != nil {
 		log.Fatal(err)
 	}
