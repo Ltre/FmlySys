@@ -749,3 +749,64 @@ README 已切换到 `scripts/win-dev.start.cmd`，新增 Linux 脚本用法，�
 - `scripts/linux-alyhk.start.cmd` 通过 `bash -n`；
 - 使用 fake `go` 对 Linux 脚本做启动流程冒烟测试，确认仓库根目录解析、配置模板生成以及 `tidy → download → verify → run` 调用顺序正确；
 - Linux 脚本冒烟测试确认默认 `FMLYSYS_DEV_AUTH_ENABLED=0`，不会把 Windows 本地开发登录带到服务器环境。
+
+## 19. 本地开发登录 Pending 与管理员密钥失配恢复
+
+### 19.1 `/login/dev` Pending 根因
+
+`POST /login/dev` 本身只创建成员 Session、写 Cookie，并以 303 重定向到首页；真正卡住的是重定向后的首页业务读取。开发身份拥有全部成员权限，包括 `share.view`，因此首页会读取 `FamilyArchives()`。
+
+`FamilyArchives()` 在外层 `archives` 查询得到的 `*sql.Rows` 尚未释放时，会逐条调用 `Attachments()` 再执行一条 SQLite 查询。此前 `internal/db.Open()` 强制：
+
+```text
+SetMaxOpenConns(1)
+```
+
+这会形成确定性的连接池自锁：外层 Rows 占住唯一连接，内层附件查询等待第二条连接，而唯一连接只有外层 Rows 结束后才会释放。只要存在至少一条 family archive，浏览器就会看到登录导航长时间 pending。这不是 `/login/dev` HTTP Handler 本身慢，也不是网络问题。
+
+本轮移除单连接限制，改成有边界的小连接池：
+
+```text
+MaxOpenConns = 8
+MaxIdleConns = 4
+ConnMaxIdleTime = 5 minutes
+```
+
+SQLite 仍保持 WAL、foreign_keys 和 `busy_timeout=5000`。WAL 允许并发读取，冲突写入仍由 SQLite 自身和 busy timeout 约束；连接数也没有无限放开。
+
+同时给普通页面/认证请求增加 15 秒 request context deadline，作为数据库路径的第二道防线。Multipart 上传以及 `/files/`、`/evidence/` 文件传输不套用该 15 秒 deadline，避免合法大文件传输被误杀。
+
+### 19.2 `cipher: message authentication failed` 根因与恢复
+
+该错误不是“管理员密码错误”，而是 AES-GCM 的消息认证失败：当前运行时使用的主密钥无法验证已有密文。FmlySys 的 `data/admin-credentials.enc` 以及 `system.db` 中的 TOTP Secret 都使用 `data/system.key` 或 `FMLYSYS_MASTER_KEY` 对应的主密钥加密，所以以下情况都会导致该错误：
+
+- `data/system.key` 被删除后重新生成；
+- `FMLYSYS_MASTER_KEY` 被修改；
+- 把 `system.db` / `admin-credentials.enc` 从另一环境复制过来，但没有同步原主密钥；
+- 数据文件和密钥来自不同备份时间点。
+
+本轮不再把底层 `cipher: message authentication failed` 原样暴露给登录页，而是增加启动期可恢复检测：
+
+1. 如果未配置 `FMLYSYS_MASTER_KEY`，`data/system.key` 缺失但 `admin-credentials.enc` 仍存在，程序不会静默生成一把新密钥继续运行；
+2. 没有恢复密码时，程序明确要求恢复原 `system.key`，或者在 `data/config.env` 临时设置 `FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD`；
+3. 已提供本机重置密码且管理员凭据因主密钥失配无法解密时，用该密码重新生成 PBKDF2 摘要，并用当前主密钥重建 `admin-credentials.enc`，同时清除旧后台 Session；
+4. 启动时同步检查已有 TOTP Secret 是否能由当前主密钥解密；
+5. 如果 TOTP Secret 仍可解密，保持现有 Google Authenticator 绑定不变；
+6. 如果 TOTP Secret 也属于旧主密钥，只有在本机恢复密码存在且能通过当前凭据验证时，才清空旧 TOTP 密文、`totp_confirmed` 和 `last_totp_step`，让管理员下次登录重新绑定 Google Authenticator；
+7. 不删除 `system.db`，不删除业务 Partition，也不影响家族业务数据。
+
+对于非 GCM 密钥失配的其它损坏（例如密文格式本身损坏），仍然明确报错，不把任何加密错误都当成可以静默重置的情况。
+
+### 19.3 验证与兼容边界
+
+本轮新增回归测试覆盖：
+
+- 外层 SQLite Rows 尚未关闭时，嵌套读取仍能在 1 秒 context 内完成，防止重新引入单连接自锁；
+- 普通 HTTP 请求会获得有限 deadline；
+- 使用另一把主密钥启动且提供本地恢复密码时，管理员密码凭据可以重建；
+- 同一场景下旧 TOTP Secret 无法解密时会安全重置 TOTP 绑定，管理员密码仍可验证；
+- 主密钥失配但没有本地恢复密码时返回包含恢复操作的明确错误，而不是裸 `cipher:`。
+
+登录页顺便删除了已经废弃的 `FMLYSYS_WECHAT_REDIRECT_URL` 提示，只保留当前实际需要的 AppID/AppSecret。
+
+本轮没有数据库 schema 变化，不需要 migration，也不要求删除现有 `data`。用户升级后应先保留 `data/config.env` 中已经填写的 `FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD`，启动一次完成必要的凭据/TOTP 恢复；确认新密码可登录并完成可能出现的 Google Authenticator 重新绑定后，再将该明文重置密码清空。

@@ -19,7 +19,14 @@ func Open(path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	conn.SetMaxOpenConns(1)
+	// Several read paths intentionally load child records while parent rows are
+	// still being scanned. A single database/sql connection self-deadlocks in
+	// that pattern because the nested read waits for the connection held by the
+	// outer rows. Keep a small bounded pool: WAL allows concurrent readers while
+	// SQLite + busy_timeout continue to serialize conflicting writers.
+	conn.SetMaxOpenConns(8)
+	conn.SetMaxIdleConns(4)
+	conn.SetConnMaxIdleTime(5 * time.Minute)
 	if err := conn.Ping(); err != nil {
 		conn.Close()
 		return nil, err

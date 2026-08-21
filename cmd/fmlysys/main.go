@@ -39,12 +39,12 @@ func main() {
 		}
 	}
 
-	masterKey, err := adminauth.LoadMasterKey(cfg.DataDir, cfg.MasterKey)
+	masterKey, err := adminauth.LoadMasterKeyForStartup(cfg.DataDir, cfg.MasterKey, cfg.AdminBootstrapPassword)
 	if err != nil {
 		log.Fatal(err)
 	}
 	admin := adminauth.New(pm.SystemDB, masterKey, cfg.DataDir)
-	if err := admin.EnsureBootstrapAdmin(ctx, cfg.AdminUsername, cfg.AdminBootstrapPassword); err != nil {
+	if err := admin.EnsureBootstrapAdminRecoverable(ctx, cfg.AdminUsername, cfg.AdminBootstrapPassword); err != nil {
 		log.Fatal(err)
 	}
 
@@ -52,7 +52,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	handler := httpserver.WithTOTPSetupAlias(app, app.Handler())
+	handler := httpserver.WithRequestDeadline(httpserver.WithTOTPSetupAlias(app, app.Handler()), 15*time.Second)
 	srv := &http.Server{Addr: cfg.Addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		log.Printf("FmlySys listening on %s, partition=%s, config=%s, admin_credentials=%s", cfg.Addr, pm.ActiveID, cfg.ConfigFile, admin.CredentialsPath())
