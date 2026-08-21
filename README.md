@@ -34,7 +34,7 @@ Windows 启动脚本会在首次运行时自动创建：
 data/config.env
 ```
 
-该文件位于运行时 `data/` 中，已经被 `.gitignore` 排除，适合保存本机测试环境的管理员初始化信息和微信开发者配置，不需要每次启动前重新执行 `set`。
+该文件位于运行时 `data/` 中，已经被 `.gitignore` 排除，适合保存本机测试环境的管理员初始化/重置信息和微信开发者配置，不需要每次启动前重新执行 `set`。
 
 示例：
 
@@ -55,9 +55,30 @@ FMLYSYS_MASTER_KEY=
 
 因此部署环境仍然可以使用环境变量覆盖本机配置。`FMLYSYS_DATA_DIR` 本身决定配置文件所在目录，所以它只从环境变量/启动脚本取得，不从 `data/config.env` 自己读取。
 
-`data/config.env` 可能包含管理员初始密码和微信 AppSecret，应当视为敏感文件，不要提交、发送或放进公开备份。
+`data/config.env` 可能包含管理员临时初始化/重置密码和微信 AppSecret，应当视为敏感文件，不要提交、发送或放进公开备份。管理员密码凭据创建成功后，可以把 `FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD` 清空；只有首次创建或忘记密码需要重置时再临时填写。
 
-### 首次创建后台管理员
+### 管理员密码不存数据库
+
+管理员身份、TOTP 状态和后台 Session 仍保存在 `system.db`，但**管理员密码及其密码摘要不再保存在数据库中**。
+
+密码验证使用独立文件：
+
+```text
+data/admin-credentials.enc
+```
+
+文件内容是管理员用户名和 PBKDF2-SHA256 密码摘要组成的凭据记录，再整体使用当前 `system.key` / `FMLYSYS_MASTER_KEY` 对应的 AES-256-GCM 主密钥加密。数据库中的旧 `password_hash` 列仅为旧 schema 兼容保留，新代码只写空字符串。
+
+升级旧数据时，程序按以下顺序处理：
+
+1. 如果 `data/admin-credentials.enc` 已存在，直接使用加密凭据；
+2. 如果文件不存在但旧 `system.db` 仍有 `password_hash`，先把旧 hash 加密迁移到文件；
+3. 只有确认加密文件成功写入后，才清空数据库中的旧 `password_hash`；
+4. 新建管理员从一开始就只把密码摘要写入加密文件，数据库字段保持为空。
+
+因此不需要删除现有 `system.db`，也不需要重新绑定 Google Authenticator。
+
+### 首次创建与忘记密码重置
 
 如果 `system.db` 还没有管理员，程序会从环境变量或 `data/config.env` 读取：
 
@@ -66,11 +87,17 @@ FMLYSYS_ADMIN_USERNAME
 FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD
 ```
 
-并在启动时创建第一个管理员。密码至少 10 个字符。
+并创建管理员身份及 `data/admin-credentials.enc`。密码至少 10 个字符。
 
-这个密码只用于**首次创建管理员**：管理员一旦写入 `system.db`，以后启动不需要再次提供 bootstrap password，也不会因为修改 `data/config.env` 而自动重置已有管理员密码。
+如果以后忘记管理员密码，也不需要删除数据库。直接在 `data/config.env` 临时把：
 
-访问 `/admin/login`，密码验证通过后首次绑定 Google Authenticator，之后每次登录均需要密码 + TOTP。
+```text
+FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=一个新的至少10位密码
+```
+
+改成新的密码并重新启动。若该值与当前加密凭据不一致，程序会重新生成 `data/admin-credentials.enc` 中的密码摘要，并使现有后台 Session 失效；`system.db`、家族业务数据和既有 TOTP 绑定均保留不动。确认新密码可以登录后，可再次把该配置清空，避免长期保留明文初始化/重置密码。
+
+访问 `/admin/login` 后仍然是：管理员密码 → Google Authenticator TOTP → 后台。
 
 首次绑定页提供“密钥别名”输入框。可以使用例如：
 
@@ -82,7 +109,7 @@ FmlySys 正式环境
 
 二维码会随别名更新，Google Authenticator 中会以该别名区分不同环境。别名只是 OTPAuth 的账号标签，不参与验证码计算，也不改变 TOTP Secret。
 
-TOTP 密钥使用 AES-256-GCM 加密保存。若未设置 `FMLYSYS_MASTER_KEY`，程序会在 `data/system.key` 自动生成本机主密钥；该文件必须与数据库一并安全备份，且不得提交 Git。
+TOTP Secret 使用 AES-256-GCM 加密保存在 `system.db`；管理员密码凭据文件也使用同一主密钥加密。若未设置 `FMLYSYS_MASTER_KEY`，程序会在 `data/system.key` 自动生成本机主密钥。`system.key` 必须与 `system.db`、`admin-credentials.enc` 一并安全备份，且不得提交 Git。
 
 ### 微信扫码登录
 

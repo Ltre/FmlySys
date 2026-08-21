@@ -492,3 +492,78 @@ FMLYSYS_WECHAT_REDIRECT_URL=...
 - Google Authenticator 别名归一化增加单元测试；
 - 绑定模板使用 Go `html/template` 实际解析和渲染检查，确认 JavaScript 中管理员用户名被正确输出为字符串；
 - 不新增数据库 schema，现有 `system.db` 和业务 Partition 不需要 migration。
+
+## 16. 管理员密码移出数据库
+
+### 16.1 目标与边界
+
+本轮按新的安全/可恢复性要求调整管理员密码存储：**管理员密码以及密码摘要均不再以有效数据形式保存在 `system.db` 中**。数据库继续保存管理员身份、启停状态、TOTP Secret（加密）、TOTP 状态和后台 Session，但密码验证改为独立本机文件。
+
+新的密码凭据文件固定为：
+
+```text
+data/admin-credentials.enc
+```
+
+文件不会保存明文密码。内部先生成 PBKDF2-SHA256 密码摘要，再把包含用户名、摘要、版本号和更新时间的 JSON 凭据整体使用 AES-256-GCM 加密。加密仍复用当前 `data/system.key` 或 `FMLYSYS_MASTER_KEY` 派生的主密钥。
+
+这意味着即使查看 `admin-credentials.enc` 原始内容，也看不到用户名、PBKDF2 标记或密码摘要；密码比对时由服务端先解密凭据，再执行原有 PBKDF2 常量时间比较。
+
+### 16.2 为什么不直接增加“清空 password_hash”的 migration
+
+现有 `migrations/system/000002_admin_auth.sql` 中已经存在 `password_hash TEXT NOT NULL`。不能简单新增 migration 在数据库打开时立刻把它清空，因为 migration 会早于管理员认证服务初始化执行：如果先清空，旧安装的密码摘要还没有机会搬到文件中，会造成管理员不可登录。
+
+因此本轮采用启动期安全迁移：
+
+1. 启动并打开既有 `system.db`；
+2. 如果 `data/admin-credentials.enc` 不存在，检查旧 `admin_users.password_hash`；
+3. 如果 `data/config.env` 临时提供了新密码，则优先使用新密码生成摘要，等同于一次忘密重置；否则直接迁移旧 PBKDF2 摘要；
+4. 使用临时文件 + rename 写入并确认 `admin-credentials.enc` 成功；
+5. 最后才把数据库中的旧 `password_hash` 更新为空字符串。
+
+旧列暂时仅作为 schema 兼容壳保留，新代码创建管理员时从第一天起只向该列写空字符串。以后如果整体重建 system schema，再考虑物理删除该历史列；当前不为删列承担 SQLite 表重建风险。
+
+### 16.3 忘记密码后的恢复
+
+`FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD` 的语义扩展为“首次创建 / 本机密码重置”。如果管理员已经存在、加密凭据文件也存在，但 `data/config.env` 中临时填写的新密码与当前摘要不一致，启动时会：
+
+- 为新密码生成新的 PBKDF2-SHA256 摘要；
+- 重写 `data/admin-credentials.enc`；
+- 删除已有后台 Session，避免旧已登录 Session 在密码重置后继续存活；
+- 保留 `system.db`、TOTP Secret、TOTP 绑定和全部家族数据。
+
+所以忘记密码时不需要删除数据库。操作流程为：
+
+```text
+编辑 data/config.env
+→ FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=新的至少10位密码
+→ 重启 FmlySys
+→ 用新密码 + 原 Google Authenticator 验证码登录
+→ 确认成功后把该配置重新清空
+```
+
+如果凭据文件丢失但数据库中还有旧版本密码摘要，程序会自动迁移；如果凭据文件和旧摘要都不存在，则启动会明确提示在 `data/config.env` 临时设置新密码，而不是要求删库。
+
+### 16.4 文件一致性与 Windows
+
+凭据写入使用同目录临时文件、flush/sync 后再 rename，尽量避免进程中断产生半文件。考虑 Windows 对已有目标文件 rename 替换的行为差异，第一次 rename 失败时只删除旧的 `admin-credentials.enc` 后重试，不触碰 `system.db` 或其它 data 文件。
+
+Windows 开发脚本同步显示：
+
+```text
+Admin credentials: <repo>\data\admin-credentials.enc
+```
+
+并在 `data/config.env` 模板中明确说明密码行只用于首次创建或重置，成功后建议清空。
+
+### 16.5 验证
+
+`internal/adminauth/adminauth_test.go` 新增覆盖：
+
+- 新管理员创建后数据库 `password_hash` 必须为空；
+- 正确密码可以通过加密凭据文件完成验证，错误密码拒绝；
+- `admin-credentials.enc` 原始密文中不出现明文密码、`pbkdf2-sha256` 或 JSON `password_hash` 字段；
+- 修改配置密码并再次执行启动初始化逻辑，可在不删除数据库的情况下重置密码；
+- 旧数据库中的 PBKDF2 `password_hash` 可自动迁移到加密文件，迁移后数据库字段被清空，旧密码仍可正常验证。
+
+本轮没有新增 SQLite schema migration，现有 `data/system.db`、业务 Partition 和 Google Authenticator 绑定可以原地沿用。

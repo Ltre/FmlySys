@@ -13,6 +13,7 @@ import (
 	"encoding/base32"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -24,13 +25,16 @@ import (
 )
 
 const (
-	passwordIterations = 210000
-	adminSessionTTL     = 12 * time.Hour
+	passwordIterations  = 210000
+	adminSessionTTL      = 12 * time.Hour
+	CredentialsFilename = "admin-credentials.enc"
+	credentialsVersion  = 1
 )
 
 type Service struct {
-	DB  *sql.DB
-	key []byte
+	DB              *sql.DB
+	key             []byte
+	credentialsPath string
 }
 
 type User struct {
@@ -45,7 +49,18 @@ type Session struct {
 	Stage    string
 }
 
-func New(db *sql.DB, key []byte) *Service { return &Service{DB: db, key: key} }
+type credentialRecord struct {
+	Version      int    `json:"version"`
+	Username     string `json:"username"`
+	PasswordHash string `json:"password_hash"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
+func New(db *sql.DB, key []byte, dataDir string) *Service {
+	return &Service{DB: db, key: key, credentialsPath: filepath.Join(dataDir, CredentialsFilename)}
+}
+
+func (s *Service) CredentialsPath() string { return s.credentialsPath }
 
 func LoadMasterKey(dataDir, configured string) ([]byte, error) {
 	if configured != "" {
@@ -82,35 +97,251 @@ func (s *Service) HasAdmin(ctx context.Context) (bool, error) {
 	return n > 0, nil
 }
 
+// EnsureBootstrapAdmin keeps password material outside system.db.
+//
+// FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD has two purposes:
+//   - create the encrypted credential file for a new/legacy administrator;
+//   - reset the encrypted credential file when the configured password changes.
+//
+// The database password_hash column is retained only for backward schema
+// compatibility. Existing legacy hashes are migrated to admin-credentials.enc
+// and then cleared; new code writes only an empty string to that column.
 func (s *Service) EnsureBootstrapAdmin(ctx context.Context, username, password string) error {
-	has, err := s.HasAdmin(ctx)
-	if err != nil || has || password == "" {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		username = "admin"
+	}
+
+	var id int64
+	var dbUsername, legacyHash string
+	err := s.DB.QueryRowContext(ctx, `SELECT id,username,password_hash FROM admin_users ORDER BY id LIMIT 1`).Scan(&id, &dbUsername, &legacyHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return s.bootstrapWithoutDatabaseAdmin(ctx, username, password)
+	}
+	if err != nil {
 		return err
 	}
-	if len(password) < 10 {
-		return errors.New("FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD 至少 10 个字符")
+
+	creds, credErr := s.readCredentials()
+	if credErr == nil {
+		changed := false
+		if creds.Username != dbUsername {
+			creds.Username = dbUsername
+			changed = true
+		}
+		if password != "" {
+			if err := validateAdminPassword(password); err != nil {
+				return err
+			}
+			if !verifyPassword(creds.PasswordHash, password) {
+				hash, err := hashPassword(password)
+				if err != nil {
+					return err
+				}
+				creds.PasswordHash = hash
+				changed = true
+			}
+		}
+		if changed {
+			if err := s.writeCredentials(creds); err != nil {
+				return err
+			}
+			// A configured password change is an explicit local reset. Existing
+			// authenticated sessions must not survive it.
+			if _, err := s.DB.ExecContext(ctx, `DELETE FROM admin_sessions WHERE admin_user_id=?`, id); err != nil {
+				return err
+			}
+		}
+		if legacyHash != "" {
+			return s.clearLegacyPasswordHash(ctx, id)
+		}
+		return nil
+	}
+	if !errors.Is(credErr, os.ErrNotExist) {
+		return fmt.Errorf("管理员密码凭据文件不可读取：%w", credErr)
+	}
+
+	// First startup after upgrading from the old database-backed password
+	// design. Prefer an explicitly configured password so a forgotten legacy
+	// password can be reset without touching system.db; otherwise migrate the
+	// old hash as-is.
+	hash := legacyHash
+	if password != "" {
+		if err := validateAdminPassword(password); err != nil {
+			return err
+		}
+		hash, err = hashPassword(password)
+		if err != nil {
+			return err
+		}
+	}
+	if hash == "" {
+		return fmt.Errorf("管理员密码凭据文件 %s 不存在；请在 data/config.env 临时设置 FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD 后重启", s.credentialsPath)
+	}
+	if !looksLikePasswordHash(hash) {
+		return errors.New("旧管理员密码摘要格式无法迁移；请在 data/config.env 设置新的 FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD 后重启")
+	}
+	if err := s.writeCredentials(credentialRecord{Username: dbUsername, PasswordHash: hash}); err != nil {
+		return err
+	}
+	if _, err := s.DB.ExecContext(ctx, `DELETE FROM admin_sessions WHERE admin_user_id=?`, id); err != nil {
+		return err
+	}
+	return s.clearLegacyPasswordHash(ctx, id)
+}
+
+func (s *Service) bootstrapWithoutDatabaseAdmin(ctx context.Context, username, password string) error {
+	creds, err := s.readCredentials()
+	if err == nil {
+		if password != "" {
+			if err := validateAdminPassword(password); err != nil {
+				return err
+			}
+			if !verifyPassword(creds.PasswordHash, password) {
+				hash, err := hashPassword(password)
+				if err != nil {
+					return err
+				}
+				creds.PasswordHash = hash
+				if err := s.writeCredentials(creds); err != nil {
+					return err
+				}
+			}
+		}
+		_, err = s.DB.ExecContext(ctx, `INSERT INTO admin_users(username,password_hash,totp_confirmed,last_totp_step,created_at,updated_at) VALUES(?,'',0,-1,?,?)`, creds.Username, now(), now())
+		return err
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("管理员密码凭据文件不可读取：%w", err)
+	}
+	if password == "" {
+		return nil
+	}
+	if err := validateAdminPassword(password); err != nil {
+		return err
 	}
 	hash, err := hashPassword(password)
 	if err != nil {
 		return err
 	}
-	_, err = s.DB.ExecContext(ctx, `INSERT INTO admin_users(username,password_hash,totp_confirmed,last_totp_step,created_at,updated_at) VALUES(?,?,0,-1,?,?)`, username, hash, now(), now())
+	if err := s.writeCredentials(credentialRecord{Username: username, PasswordHash: hash}); err != nil {
+		return err
+	}
+	_, err = s.DB.ExecContext(ctx, `INSERT INTO admin_users(username,password_hash,totp_confirmed,last_totp_step,created_at,updated_at) VALUES(?,'',0,-1,?,?)`, username, now(), now())
+	return err
+}
+
+func validateAdminPassword(password string) error {
+	if len(password) < 10 {
+		return errors.New("FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD 至少 10 个字符")
+	}
+	return nil
+}
+
+func looksLikePasswordHash(hash string) bool {
+	parts := strings.Split(hash, "$")
+	return len(parts) == 4 && parts[0] == "pbkdf2-sha256"
+}
+
+func (s *Service) clearLegacyPasswordHash(ctx context.Context, userID int64) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE admin_users SET password_hash='',updated_at=? WHERE id=? AND password_hash<>''`, now(), userID)
 	return err
 }
 
 func (s *Service) VerifyPassword(ctx context.Context, username, password string) (User, error) {
 	var u User
-	var hash string
 	var confirmed int
-	err := s.DB.QueryRowContext(ctx, `SELECT id,username,password_hash,totp_confirmed FROM admin_users WHERE username=? AND status='active'`, username).Scan(&u.ID, &u.Username, &hash, &confirmed)
+	err := s.DB.QueryRowContext(ctx, `SELECT id,username,totp_confirmed FROM admin_users WHERE username=? AND status='active'`, username).Scan(&u.ID, &u.Username, &confirmed)
 	if err != nil {
 		return User{}, errors.New("管理员账号或密码错误")
 	}
-	if !verifyPassword(hash, password) {
+	creds, err := s.readCredentials()
+	if err != nil {
+		return User{}, fmt.Errorf("管理员密码凭据文件不可用：%w", err)
+	}
+	if creds.Username != u.Username || !verifyPassword(creds.PasswordHash, password) {
 		return User{}, errors.New("管理员账号或密码错误")
 	}
 	u.TOTPConfirmed = confirmed == 1
 	return u, nil
+}
+
+func (s *Service) readCredentials() (credentialRecord, error) {
+	b, err := os.ReadFile(s.credentialsPath)
+	if err != nil {
+		return credentialRecord{}, err
+	}
+	plain, err := s.decrypt(strings.TrimSpace(string(b)))
+	if err != nil {
+		return credentialRecord{}, err
+	}
+	var creds credentialRecord
+	if err := json.Unmarshal([]byte(plain), &creds); err != nil {
+		return credentialRecord{}, fmt.Errorf("管理员密码凭据内容损坏：%w", err)
+	}
+	if creds.Version != credentialsVersion || strings.TrimSpace(creds.Username) == "" || !looksLikePasswordHash(creds.PasswordHash) {
+		return credentialRecord{}, errors.New("管理员密码凭据格式无效")
+	}
+	return creds, nil
+}
+
+func (s *Service) writeCredentials(creds credentialRecord) error {
+	creds.Version = credentialsVersion
+	creds.Username = strings.TrimSpace(creds.Username)
+	creds.UpdatedAt = now()
+	if creds.Username == "" || !looksLikePasswordHash(creds.PasswordHash) {
+		return errors.New("拒绝写入无效的管理员密码凭据")
+	}
+	plain, err := json.Marshal(creds)
+	if err != nil {
+		return err
+	}
+	encoded, err := s.encrypt(string(plain))
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(s.credentialsPath)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".admin-credentials-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	keep := false
+	defer func() {
+		if !keep {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.WriteString(encoded + "\n"); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, s.credentialsPath); err != nil {
+		// Windows does not reliably replace an existing destination with
+		// os.Rename, so retry after removing only the old credential file.
+		if removeErr := os.Remove(s.credentialsPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return removeErr
+		}
+		if err := os.Rename(tmpName, s.credentialsPath); err != nil {
+			return err
+		}
+	}
+	keep = true
+	return nil
 }
 
 func (s *Service) BeginSession(ctx context.Context, userID int64, stage string) (string, error) {
@@ -320,7 +551,7 @@ func (s *Service) decrypt(encoded string) (string, error) {
 		return "", err
 	}
 	if len(b) < gcm.NonceSize() {
-		return "", errors.New("加密的 TOTP 密钥数据损坏")
+		return "", errors.New("加密数据损坏")
 	}
 	plain, err := gcm.Open(nil, b[:gcm.NonceSize()], b[gcm.NonceSize():], nil)
 	return string(plain), err

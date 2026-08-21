@@ -43,7 +43,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	admin := adminauth.New(pm.SystemDB, masterKey)
+	admin := adminauth.New(pm.SystemDB, masterKey, cfg.DataDir)
 	if err := admin.EnsureBootstrapAdmin(ctx, cfg.AdminUsername, cfg.AdminBootstrapPassword); err != nil {
 		log.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func main() {
 	handler := httpserver.WithTOTPSetupAlias(app, app.Handler())
 	srv := &http.Server{Addr: cfg.Addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
-		log.Printf("FmlySys listening on %s, partition=%s, config=%s", cfg.Addr, pm.ActiveID, cfg.ConfigFile)
+		log.Printf("FmlySys listening on %s, partition=%s, config=%s, admin_credentials=%s", cfg.Addr, pm.ActiveID, cfg.ConfigFile, admin.CredentialsPath())
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)
 		}

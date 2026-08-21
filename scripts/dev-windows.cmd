@@ -31,11 +31,13 @@ set "PUSHD_OK=1"
 set "FMLYSYS_DATA_DIR=%REPO_ROOT%\data"
 if not defined FMLYSYS_DEV_MEMBER set "FMLYSYS_DEV_MEMBER=Dev Admin"
 set "FMLYSYS_CONFIG_FILE=%FMLYSYS_DATA_DIR%\config.env"
+set "FMLYSYS_ADMIN_CREDENTIALS=%FMLYSYS_DATA_DIR%\admin-credentials.enc"
 
 if not exist "%FMLYSYS_DATA_DIR%" mkdir "%FMLYSYS_DATA_DIR%" >nul 2>&1
 if not exist "%FMLYSYS_CONFIG_FILE%" (
     >"%FMLYSYS_CONFIG_FILE%" echo # FmlySys local config. Keep this file private; data/ is ignored by Git.
     >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_ADMIN_USERNAME=admin
+    >>"%FMLYSYS_CONFIG_FILE%" echo # Set this only for first creation or password reset; clear it again after successful login.
     >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=
     >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_WECHAT_APP_ID=
     >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_WECHAT_APP_SECRET=
@@ -54,6 +56,7 @@ echo [FmlySys] ALL_PROXY=%ALL_PROXY%
 echo [FmlySys] Listening on http://%FMLYSYS_ADDR%/
 echo [FmlySys] Data directory: %FMLYSYS_DATA_DIR%
 echo [FmlySys] Local config: %FMLYSYS_CONFIG_FILE%
+echo [FmlySys] Admin credentials: %FMLYSYS_ADMIN_CREDENTIALS%
 echo [FmlySys] Local dev login: %FMLYSYS_DEV_AUTH_ENABLED%
 echo.
 
