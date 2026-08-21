@@ -655,3 +655,97 @@ http://192.0.2.10:8080/login/wechat
 - Windows `data/config.env` 模板已删除旧回调 URL 配置项；
 - README 已明确列出固定回调 URI 和动态完整地址生成规则；
 - 本轮不涉及数据库 schema，不需要 migration，也不要求删除现有 `data`。
+
+## 18. 服务监听端口统一与 Linux 阿里云香港启动脚本
+
+### 18.1 端口配置只保留一个权威来源
+
+此前服务监听地址存在两层默认值：Windows 启动脚本直接设置 `FMLYSYS_ADDR=127.0.0.1:8080`，同时 `internal/config` 又把 `127.0.0.1:8080` 作为代码 fallback。这样即使修改了某一处，绕过脚本启动或配置失效时仍可能悄悄回落到 8080，形成多个端口来源。
+
+本轮把监听配置重新拆成：
+
+```text
+FMLYSYS_BIND_HOST
+FMLYSYS_PORT
+```
+
+其中 `FMLYSYS_PORT` 是服务监听端口的唯一权威来源。`internal/config` 不再包含 8080 或其他端口默认值，也不再读取旧的 `FMLYSYS_ADDR`。程序只从**进程环境变量**读取 `FMLYSYS_PORT`，并要求值为 `1-65535` 的整数；缺失或非法时直接拒绝启动。
+
+`FMLYSYS_BIND_HOST` 同样由启动环境提供。最终 `http.Server.Addr` 只由：
+
+```text
+net.JoinHostPort(FMLYSYS_BIND_HOST, FMLYSYS_PORT)
+```
+
+计算得到，不再让业务配置文件保存另一份监听地址。
+
+为了确保启动脚本是真正的配置入口，即使用户在 `data/config.env` 中手工写入 `FMLYSYS_PORT`，`internal/config` 也不会采用；必须由启动脚本/进程环境提供。这样调整端口时只需要修改对应环境的启动脚本。
+
+### 18.2 Windows 开发启动脚本
+
+当前 Windows 脚本名称已经是：
+
+```text
+scripts/win-dev.start.cmd
+```
+
+本轮在脚本顶部集中定义：
+
+```text
+FMLYSYS_BIND_HOST=127.0.0.1
+FMLYSYS_PORT=8080
+FMLYSYS_DEV_AUTH_ENABLED=1
+```
+
+以后 Windows 开发环境修改端口只改 `FMLYSYS_PORT` 一行。脚本输出也拆成 Bind host / Port / Listening，避免再通过一个拼好的 `FMLYSYS_ADDR` 隐藏端口来源。
+
+原有 Windows 行为保持：本地 HTTP/HTTPS/SOCKS 代理、仓库根目录解析、`data/config.env` 模板、Go 可用性检查、`go mod tidy`、`go mod download all`、`go mod verify`、`go run ./cmd/fmlysys` 以及失败暂停。
+
+### 18.3 Linux 阿里云香港启动脚本
+
+新增：
+
+```text
+scripts/linux-alyhk.start.cmd
+```
+
+文件后缀沿用项目现有启动脚本命名，但内容是带 `#!/usr/bin/env bash` 的 Bash 脚本，并以 executable mode 提交。默认监听配置：
+
+```text
+FMLYSYS_BIND_HOST=0.0.0.0
+FMLYSYS_PORT=8080
+FMLYSYS_DEV_AUTH_ENABLED=0
+```
+
+与 Windows 脚本保持同一启动流程：
+
+1. 根据脚本自身位置定位仓库根目录；
+2. 设置 `FMLYSYS_DATA_DIR=<repo>/data`；
+3. 创建缺失的 `data/config.env` 模板并尽量设置为 `0600`；
+4. 检查 `go` 是否存在；
+5. 执行 `go mod tidy`；
+6. 执行 `go mod download all`；
+7. 执行 `go mod verify`；
+8. 执行 `go run ./cmd/fmlysys`；
+9. 任一步失败时输出明确错误并以非 0 状态退出。
+
+Linux 服务器脚本不会写入 Windows 开发机的 `127.0.0.1:58591` / `51837` 代理配置，并默认关闭 dev login。若实际服务器前面由 Nginx/Caddy 本机反代，可按部署需要把 `FMLYSYS_BIND_HOST` 改成 `127.0.0.1`；端口仍只改脚本中的 `FMLYSYS_PORT`。
+
+### 18.4 文档与兼容边界
+
+README 已切换到 `scripts/win-dev.start.cmd`，新增 Linux 脚本用法，并从当前环境变量说明中删除旧 `FMLYSYS_ADDR`。历史开发记录中早期出现的 `scripts/dev-windows.cmd` 或 8080 示例保留为当时事实，不代表当前运行时仍存在代码 fallback。
+
+本轮没有修改 `data/config.env` 的既有业务/认证字段，也没有数据库 schema 变化，因此不需要 migration，不需要删除 `data`。
+
+### 18.5 验证
+
+本轮验证包括：
+
+- `internal/config` 独立 `go test` 通过；
+- 验证 `FMLYSYS_PORT=18080` 可生成 `127.0.0.1:18080`；
+- 验证只在 `data/config.env` 写端口而没有进程环境变量时仍拒绝启动；
+- 验证端口缺失、`70000` 等非法端口会拒绝启动；
+- 验证 `FMLYSYS_BIND_HOST` 缺失会拒绝启动；
+- `scripts/linux-alyhk.start.cmd` 通过 `bash -n`；
+- 使用 fake `go` 对 Linux 脚本做启动流程冒烟测试，确认仓库根目录解析、配置模板生成以及 `tidy → download → verify → run` 调用顺序正确；
+- Linux 脚本冒烟测试确认默认 `FMLYSYS_DEV_AUTH_ENABLED=0`，不会把 Windows 本地开发登录带到服务器环境。

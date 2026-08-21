@@ -16,10 +16,11 @@ set "all_proxy=%ALL_PROXY%"
 set "NO_PROXY=127.0.0.1,localhost"
 set "no_proxy=%NO_PROXY%"
 
-rem Development is intentionally bound to localhost.
-set "FMLYSYS_ADDR=127.0.0.1:8080"
+rem Listener settings: FMLYSYS_PORT is the single source of truth for the server port.
+set "FMLYSYS_BIND_HOST=127.0.0.1"
+set "FMLYSYS_PORT=8080"
 rem Local development may use the explicit dev-login button; production must leave this disabled.
-if not defined FMLYSYS_DEV_AUTH_ENABLED set "FMLYSYS_DEV_AUTH_ENABLED=1"
+set "FMLYSYS_DEV_AUTH_ENABLED=1"
 
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "REPO_ROOT=%%~fI"
@@ -52,7 +53,9 @@ echo [FmlySys] Repository root: %REPO_ROOT%
 echo [FmlySys] HTTP_PROXY=%HTTP_PROXY%
 echo [FmlySys] HTTPS_PROXY=%HTTPS_PROXY%
 echo [FmlySys] ALL_PROXY=%ALL_PROXY%
-echo [FmlySys] Listening on http://%FMLYSYS_ADDR%/
+echo [FmlySys] Bind host: %FMLYSYS_BIND_HOST%
+echo [FmlySys] Port: %FMLYSYS_PORT%
+echo [FmlySys] Listening on http://%FMLYSYS_BIND_HOST%:%FMLYSYS_PORT%/
 echo [FmlySys] Data directory: %FMLYSYS_DATA_DIR%
 echo [FmlySys] Local config: %FMLYSYS_CONFIG_FILE%
 echo [FmlySys] Admin credentials: %FMLYSYS_ADMIN_CREDENTIALS%

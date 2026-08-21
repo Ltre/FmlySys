@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,6 +15,8 @@ const LocalConfigFilename = "config.env"
 
 type Config struct {
 	Addr                   string
+	BindHost               string
+	Port                   int
 	DataDir                string
 	ConfigFile             string
 	DevMember              string
@@ -37,6 +40,15 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	port, err := listenPortFromEnvironment()
+	if err != nil {
+		return Config{}, err
+	}
+	bindHost := strings.TrimSpace(os.Getenv("FMLYSYS_BIND_HOST"))
+	if bindHost == "" {
+		return Config{}, errors.New("FMLYSYS_BIND_HOST 未设置；请通过对应的启动脚本定义服务端监听地址")
+	}
+
 	value := func(key, fallback string) string {
 		if v, ok := os.LookupEnv(key); ok {
 			return v
@@ -54,7 +66,9 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		Addr:                   nonEmpty("FMLYSYS_ADDR", "127.0.0.1:8080"),
+		Addr:                   net.JoinHostPort(bindHost, strconv.Itoa(port)),
+		BindHost:               bindHost,
+		Port:                   port,
 		DataDir:                dataDir,
 		ConfigFile:             configFile,
 		DevMember:              nonEmpty("FMLYSYS_DEV_MEMBER", "Dev Admin"),
@@ -65,6 +79,18 @@ func Load() (Config, error) {
 		AdminBootstrapPassword: value("FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD", ""),
 		MasterKey:              value("FMLYSYS_MASTER_KEY", ""),
 	}, nil
+}
+
+func listenPortFromEnvironment() (int, error) {
+	raw := strings.TrimSpace(os.Getenv("FMLYSYS_PORT"))
+	if raw == "" {
+		return 0, errors.New("FMLYSYS_PORT 未设置；请通过对应的启动脚本定义服务端监听端口")
+	}
+	port, err := strconv.Atoi(raw)
+	if err != nil || port < 1 || port > 65535 {
+		return 0, fmt.Errorf("FMLYSYS_PORT=%q 无效；端口必须是 1-65535 的整数", raw)
+	}
+	return port, nil
 }
 
 func (c Config) WeChatConfigured() bool {
