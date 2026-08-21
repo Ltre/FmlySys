@@ -230,7 +230,156 @@
 	推理过程和开发记录保存到doc/devlog/devlog-2608C-features.md
 	请在分支dev-2608C-step1开发，提交并推送该分支代码到github
 
+
+答：
+
 	
+	我继续把当前中间态收尾，不再重新设计。目标只有两个：先逐项确认这 7 个需求在远端代码里都真正落地，再把目前那些 temp: 提交压成一个正式提交，最终让 dev-2608C-step1 相对你这轮开始时只前进 1 个 commit。完成后我会再核对远端 diff，再让你 git pull。
+
+	正在搜尋 3 個網站
+
+	逐项检查后，1、4、5、6、7 的前台代码已经在中间态里真实存在；微信 OAuth/Pending、成员 Session/权限和后台 TOTP 的服务端代码也已经存在。现在发现并正在补的不是“再做一遍”，而是几个会影响实际可用性的收尾：后台页面还没接 Pending 审核/权限配置 UI，事务/消费详情页还没按权限收口，新增 QR 依赖还缺 go.sum 校验项，折叠入口也缺专门样式。 这些补齐后才算 7 项完整。
+
+	后台 Pending 审核和成员权限 UI 已经补上；我顺手做了权限一致性收口：没有 matters.manage 的成员只能看事务，不能看到“新建/更新”控件；消费详情页没有 expenses.edit 时只读，没有 reimbursements.create 时不显示报销表单。现在在做最后的模板变量校验和样式收尾，避免“页面能解析但嵌套 range 指错成员”这种细节 bug。
+
+	收尾检查里我已经确认两个新增 migration 可以在 SQLite 上实际执行，新增二维码依赖的 go.sum 也已补齐并校正。现在只剩最后一步：检查远端最终 tree 是否包含这 7 项对应文件，然后把当前临时提交链压成一个正式提交；压缩完成前我不会让你拉取。
+
+	7 项对应的最终 tree 已经齐全，临时链也没有再发生新的外部提交。我现在执行最后的历史整理：以本轮开始前的 07992291... 为唯一父提交创建正式 commit，再强制把 dev-2608C-step1 指向它；随后会用 GitHub compare 确认 ahead_by=1 / total_commits=1。
+
+	历史整理已经完成：远端 dev-2608C-step1 现在 HEAD 是正式提交 a1453f3...，它的父提交正是本轮开始前的 07992291...。GitHub compare 也已经确认 ahead_by=1、total_commits=1，所有临时 temp: 提交都不在最终分支历史里了。
+
+	我再做最后一轮文件级抽查后就给你本地测试步骤。
+
+	已经全部收尾完成，现在可以 `git pull` 测试了。
+
+	远端 `dev-2608C-step1` 最终只有**一个正式提交**：
+
+	```text
+	a1453f3a3386d00b17382e11eb77de3e2194513c
+	feat: add member and admin authentication
+	```
+
+	它直接以本轮开始前的 `07992291...` 为父提交；我已经用 GitHub compare 核对，结果是 **ahead_by=1、total_commits=1、behind_by=0**，之前开发过程中产生的 29 个 `temp:` 提交均已从最终分支历史移除。
+
+	这 7 项现在的状态是：
+
+	1. **公共资产持有人列表已恢复。** `/assets` 会公开显示家族成员当前代管的公共资产总额，但不涉及个人银行卡、微信、支付宝等真实账户余额。
+	2. **微信扫码登录 + Pending 注册 + 后台审核 + 权限 + 前台 Session 已完成。** 未绑定微信扫码后只能填写加入申请，进入 Pending；后台可绑定已有成员或创建新成员，并同时勾选权限。审核通过后重新扫码即可正式登录。后台现在也有完整的 Pending 审核和成员权限管理 UI。
+	3. **后台管理员密码 + Google Authenticator 已完成。** 首次密码通过后绑定二维码，之后登录流程为“管理员密码 → 6 位 TOTP → 后台”。TOTP Secret 加密保存，并做了验证码重放防护。相关 `admin_users/admin_sessions` 已使用独立 `system.db` migration。
+	4. **新增公共消费的支付凭证支持多文件。**
+	5. **与其他成员转账的转账凭证支持多文件。**
+	6. **登记报销的转账凭证支持多文件。** 三处现在都是 `multiple`，后端也会读取并保存全部文件，不是只改前端；单文件仍最大 10MB、一次最多 20 个。
+	7. **“我的公共资产变动”已经折叠。** 入口改名为“登记我的资产变动”，放在“公共资产持有人”区域右上角；PC 展开为角落浮层，手机端则展开为正常块状面板，并明确提示它不是公共消费入口。
+
+	另外，后台现在不仅能审核 Pending，还能对现有成员随时调整这些权限：
+
+	```text
+	查看公共资产
+	登记本人公共资产增减
+	新增公共消费
+	编辑公共消费
+	登记成员间转账
+	登记报销
+	查看家族事务
+	管理家族事务
+	查看家族共享资料
+	管理家族共享资料
+	```
+
+	权限同时在**页面和服务端路由**生效，不只是把按钮藏起来。例如普通成员新增公共消费时，经手人会强制绑定当前登录成员，不能篡改表单冒充其他付款人。
+
+	开发记录已经更新到：
+
+	```text
+	doc/devlog/devlog-2608C-features.md
+	```
+
+	新增两个增量 migration：
+
+	```text
+	migrations/partition/000003_member_auth_permissions.sql
+	migrations/system/000002_admin_auth.sql
+	```
+
+	所以**不要删除现有 `data`**，启动时会自动升级现有 SQLite。
+
+	### 你现在可以拉取
+
+	```bat
+	git switch dev-2608C-step1
+	git pull
+	```
+
+	然后第一次测试后台，先在同一个 CMD 设置一个管理员初始密码：
+
+	```bat
+	set FMLYSYS_ADMIN_USERNAME=admin
+	set FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=你自己设置一个至少10位的密码
+
+	scripts\dev-windows.cmd
+	```
+
+	启动以后先访问：
+
+	```text
+	http://localhost:8080/login
+	```
+
+	本地脚本默认开启开发登录，所以没有配置微信开放平台时，可以先点：
+
+	```text
+	本地开发身份登录
+	```
+
+	测试 `/assets`、持有人列表、折叠资产变动、多文件上传和权限界面。
+
+	后台访问：
+
+	```text
+	http://localhost:8080/admin
+	```
+
+	会跳到：
+
+	```text
+	/admin/login
+	```
+
+	输入刚才设置的管理员账号密码，第一次会进入 **Google Authenticator 绑定页**：
+
+	```text
+	扫描二维码
+	→ Google Authenticator 添加账号
+	→ 输入当前 6 位验证码
+	→ 完成绑定
+	→ 进入 /admin
+	```
+
+	管理员第一次创建成功以后，后续启动其实就不再需要：
+
+	```text
+	FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD
+	```
+
+	### 真正测试微信扫码
+
+	还要配置：
+
+	```text
+	FMLYSYS_WECHAT_APP_ID
+	FMLYSYS_WECHAT_APP_SECRET
+	FMLYSYS_WECHAT_REDIRECT_URL
+	```
+
+	其中回调类似：
+
+	```text
+	https://你的已审核域名/auth/wechat/callback
+	```
+
+	所以 `localhost` 可以把成员 Session、权限、后台审核、Google Authenticator 等都测掉，但**真正的微信扫码 OAuth 端到端测试需要你的微信开放平台网站应用和已审核回调域名**。
+
+	你现在可以 `git pull` 后直接跑 `scripts\dev-windows.cmd`。如果启动、migration、模板解析或后台首次绑定出现任何报错，把终端完整输出发来，我就基于这个正式提交继续处理。
 
 
 
