@@ -20,7 +20,6 @@ type Config struct {
 	DevAuthEnabled         bool
 	WeChatAppID            string
 	WeChatAppSecret        string
-	WeChatRedirectURL      string
 	AdminUsername          string
 	AdminBootstrapPassword string
 	MasterKey              string
@@ -62,7 +61,6 @@ func Load() (Config, error) {
 		DevAuthEnabled:         parseBool(value("FMLYSYS_DEV_AUTH_ENABLED", ""), false),
 		WeChatAppID:            strings.TrimSpace(value("FMLYSYS_WECHAT_APP_ID", "")),
 		WeChatAppSecret:        strings.TrimSpace(value("FMLYSYS_WECHAT_APP_SECRET", "")),
-		WeChatRedirectURL:      strings.TrimSpace(value("FMLYSYS_WECHAT_REDIRECT_URL", "")),
 		AdminUsername:          nonEmpty("FMLYSYS_ADMIN_USERNAME", "admin"),
 		AdminBootstrapPassword: value("FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD", ""),
 		MasterKey:              value("FMLYSYS_MASTER_KEY", ""),
@@ -70,7 +68,7 @@ func Load() (Config, error) {
 }
 
 func (c Config) WeChatConfigured() bool {
-	return c.WeChatAppID != "" && c.WeChatAppSecret != "" && c.WeChatRedirectURL != ""
+	return c.WeChatAppID != "" && c.WeChatAppSecret != ""
 }
 
 func loadConfigFile(path string) (map[string]string, error) {

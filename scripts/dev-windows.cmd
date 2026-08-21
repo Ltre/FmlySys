@@ -41,7 +41,6 @@ if not exist "%FMLYSYS_CONFIG_FILE%" (
     >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=
     >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_WECHAT_APP_ID=
     >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_WECHAT_APP_SECRET=
-    >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_WECHAT_REDIRECT_URL=
     >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_MASTER_KEY=
     echo [FmlySys] Created local config template: %FMLYSYS_CONFIG_FILE%
 )
@@ -57,6 +56,7 @@ echo [FmlySys] Listening on http://%FMLYSYS_ADDR%/
 echo [FmlySys] Data directory: %FMLYSYS_DATA_DIR%
 echo [FmlySys] Local config: %FMLYSYS_CONFIG_FILE%
 echo [FmlySys] Admin credentials: %FMLYSYS_ADMIN_CREDENTIALS%
+echo [FmlySys] WeChat callback path: /auth/wechat/callback (origin is derived from the login request)
 echo [FmlySys] Local dev login: %FMLYSYS_DEV_AUTH_ENABLED%
 echo.
 

@@ -12,7 +12,6 @@ func TestLoadReadsDataConfigAndEnvironmentOverrides(t *testing.T) {
 FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD="pass # with spaces"
 FMLYSYS_WECHAT_APP_ID=file-app
 FMLYSYS_WECHAT_APP_SECRET=file-secret
-FMLYSYS_WECHAT_REDIRECT_URL=https://example.test/auth/wechat/callback
 FMLYSYS_DEV_AUTH_ENABLED=true
 `
 	if err := os.WriteFile(filepath.Join(dir, LocalConfigFilename), []byte(content), 0o600); err != nil {
@@ -24,7 +23,6 @@ FMLYSYS_DEV_AUTH_ENABLED=true
 		"FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD",
 		"FMLYSYS_WECHAT_APP_ID",
 		"FMLYSYS_WECHAT_APP_SECRET",
-		"FMLYSYS_WECHAT_REDIRECT_URL",
 		"FMLYSYS_DEV_AUTH_ENABLED",
 	)
 	t.Setenv("FMLYSYS_DATA_DIR", dir)
@@ -40,8 +38,11 @@ FMLYSYS_DEV_AUTH_ENABLED=true
 	if cfg.AdminBootstrapPassword != "pass # with spaces" {
 		t.Fatalf("unexpected password %q", cfg.AdminBootstrapPassword)
 	}
-	if cfg.WeChatAppID != "file-app" || cfg.WeChatAppSecret != "file-secret" || cfg.WeChatRedirectURL != "https://example.test/auth/wechat/callback" {
+	if cfg.WeChatAppID != "file-app" || cfg.WeChatAppSecret != "file-secret" {
 		t.Fatalf("unexpected WeChat config: %+v", cfg)
+	}
+	if !cfg.WeChatConfigured() {
+		t.Fatal("WeChat should be configured with AppID + AppSecret only")
 	}
 	if !cfg.DevAuthEnabled {
 		t.Fatal("expected boolean value from data/config.env")

@@ -17,10 +17,9 @@ const (
 )
 
 type Client struct {
-	AppID       string
-	AppSecret   string
-	RedirectURL string
-	HTTP        *http.Client
+	AppID     string
+	AppSecret string
+	HTTP      *http.Client
 }
 
 type Profile struct {
@@ -45,14 +44,14 @@ type userInfoResponse struct {
 	ErrMsg   string `json:"errmsg"`
 }
 
-func New(appID, secret, redirectURL string) *Client {
-	return &Client{AppID: appID, AppSecret: secret, RedirectURL: redirectURL, HTTP: &http.Client{Timeout: 12 * time.Second}}
+func New(appID, secret string) *Client {
+	return &Client{AppID: appID, AppSecret: secret, HTTP: &http.Client{Timeout: 12 * time.Second}}
 }
 
-func (c *Client) LoginURL(state string) string {
+func (c *Client) LoginURL(state, redirectURL string) string {
 	v := url.Values{}
 	v.Set("appid", c.AppID)
-	v.Set("redirect_uri", c.RedirectURL)
+	v.Set("redirect_uri", redirectURL)
 	v.Set("response_type", "code")
 	v.Set("scope", "snsapi_login")
 	v.Set("state", state)

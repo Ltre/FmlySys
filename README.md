@@ -43,11 +43,28 @@ FMLYSYS_ADMIN_USERNAME=admin
 FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=请换成至少10位的强密码
 FMLYSYS_WECHAT_APP_ID=你的AppID
 FMLYSYS_WECHAT_APP_SECRET=你的AppSecret
-FMLYSYS_WECHAT_REDIRECT_URL=https://你的已审核域名/auth/wechat/callback
 FMLYSYS_MASTER_KEY=
 ```
 
-读取优先级固定为：
+微信 OAuth **不需要配置站点域名、IP、完整回调 URL 或 PUBLIC_BASE_URL**。FmlySys 的回调路径在代码中固定为：
+
+```text
+/auth/wechat/callback
+```
+
+用户从哪个域名/IP进入 `/login/wechat`，程序就使用该次请求的协议和 Host 动态生成完整 `redirect_uri`。例如：
+
+```text
+访问 https://family-a.example.com/login/wechat
+→ redirect_uri=https://family-a.example.com/auth/wechat/callback
+
+访问 https://family-b.example.com/login/wechat
+→ redirect_uri=https://family-b.example.com/auth/wechat/callback
+```
+
+如果前面有 Nginx/Caddy/其他反向代理，应保留原始 `Host`，并正确设置 `X-Forwarded-Proto`，这样应用才能知道外部访问使用的是 HTTP 还是 HTTPS。FmlySys 不读取 `X-Forwarded-Host`，避免由额外 Header 决定 OAuth 回调主机。
+
+读取普通配置的优先级固定为：
 
 ```text
 环境变量 > data/config.env > 程序默认值
@@ -113,21 +130,34 @@ TOTP Secret 使用 AES-256-GCM 加密保存在 `system.db`；管理员密码凭�
 
 ### 微信扫码登录
 
-网站应用需要配置：
+FmlySys 本身只需要保存微信应用凭据：
 
 ```text
 FMLYSYS_WECHAT_APP_ID
 FMLYSYS_WECHAT_APP_SECRET
-FMLYSYS_WECHAT_REDIRECT_URL
 ```
 
-以上三项既可以写入 `data/config.env`，也可以通过环境变量提供。
+这两项既可以写入 `data/config.env`，也可以通过环境变量提供。
 
-`FMLYSYS_WECHAT_REDIRECT_URL` 应指向：
+OAuth 回调接口由代码固定为：
 
 ```text
-https://你的已审核域名/auth/wechat/callback
+GET /auth/wechat/callback
 ```
+
+完整回调地址无需在 FmlySys 中重复配置。程序在用户打开 `/login/wechat` 时，根据该请求实际使用的 scheme + Host 自动构造。例如站点实际访问地址为：
+
+```text
+https://family.example.com
+```
+
+则本次微信 OAuth 使用的完整回调地址自动为：
+
+```text
+https://family.example.com/auth/wechat/callback
+```
+
+因此换服务器、域名或 IP 不需要修改 FmlySys 的微信回调配置；只需要确保微信开放平台侧允许你实际用于登录的部署域名/回调信息。
 
 AppSecret 仅在服务端使用。未知微信身份扫码后只能提交加入申请，在后台审核通过并绑定到内部 `member_id` 以后才能创建正式成员 session。
 
@@ -143,5 +173,4 @@ FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=
 FMLYSYS_MASTER_KEY=
 FMLYSYS_WECHAT_APP_ID=
 FMLYSYS_WECHAT_APP_SECRET=
-FMLYSYS_WECHAT_REDIRECT_URL=
 ```

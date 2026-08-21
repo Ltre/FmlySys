@@ -129,7 +129,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /login", s.loginPage)
 	s.mux.HandleFunc("POST /login/dev", s.devLogin)
 	s.mux.HandleFunc("GET /login/wechat", s.wechatLogin)
-	s.mux.HandleFunc("GET /auth/wechat/callback", s.wechatCallback)
+	s.mux.HandleFunc("GET "+WeChatCallbackPath, s.wechatCallback)
 	s.mux.HandleFunc("GET /join", s.joinPage)
 	s.mux.HandleFunc("POST /join", s.submitJoin)
 	s.mux.HandleFunc("POST /logout", s.memberLogout)
@@ -317,7 +317,12 @@ func (s *Server) devLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) wechatLogin(w http.ResponseWriter, r *http.Request) {
 	if !s.Config.WeChatConfigured() {
-		http.Error(w, "微信登录尚未配置，请设置 FMLYSYS_WECHAT_APP_ID / APP_SECRET / REDIRECT_URL", http.StatusServiceUnavailable)
+		http.Error(w, "微信登录尚未配置，请设置 FMLYSYS_WECHAT_APP_ID / FMLYSYS_WECHAT_APP_SECRET", http.StatusServiceUnavailable)
+		return
+	}
+	callbackURL, err := WeChatCallbackURL(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	state, err := randomToken()
@@ -325,20 +330,20 @@ func (s *Server) wechatLogin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	setCookie(w, r, "fmly_wechat_state", state, "/auth/wechat/callback", 600)
-	client := wechat.New(s.Config.WeChatAppID, s.Config.WeChatAppSecret, s.Config.WeChatRedirectURL)
-	http.Redirect(w, r, client.LoginURL(state), http.StatusFound)
+	setCookie(w, r, "fmly_wechat_state", state, WeChatCallbackPath, 600)
+	client := wechat.New(s.Config.WeChatAppID, s.Config.WeChatAppSecret)
+	http.Redirect(w, r, client.LoginURL(state, callbackURL), http.StatusFound)
 }
 
 func (s *Server) wechatCallback(w http.ResponseWriter, r *http.Request) {
 	want := cookieValue(r, "fmly_wechat_state")
 	got := r.URL.Query().Get("state")
-	clearCookie(w, r, "fmly_wechat_state", "/auth/wechat/callback")
+	clearCookie(w, r, "fmly_wechat_state", WeChatCallbackPath)
 	if want == "" || got == "" || subtle.ConstantTimeCompare([]byte(want), []byte(got)) != 1 {
 		http.Error(w, "微信登录 state 校验失败，请重新扫码", http.StatusBadRequest)
 		return
 	}
-	client := wechat.New(s.Config.WeChatAppID, s.Config.WeChatAppSecret, s.Config.WeChatRedirectURL)
+	client := wechat.New(s.Config.WeChatAppID, s.Config.WeChatAppSecret)
 	profile, err := client.Profile(r.Context(), r.URL.Query().Get("code"))
 	if err != nil {
 		s.fail(w, r, err)

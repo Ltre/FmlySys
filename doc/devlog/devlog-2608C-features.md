@@ -463,25 +463,24 @@ data/config.env
 - CI、容器或正式部署仍可以用环境变量覆盖；
 - `FMLYSYS_DATA_DIR` 自身不能从这个文件读取，因为必须先知道 data 目录才能定位配置文件。
 
-当前可从文件读取的现有配置包括管理员初始化信息、微信 OAuth、Master Key、监听地址、开发身份等 `FMLYSYS_*` 键。用户本轮重点需要的配置为：
+当前可从文件读取的现有配置包括管理员初始化信息、微信 OAuth、Master Key、监听地址、开发身份等 `FMLYSYS_*` 键。该节记录的是当时版本；微信回调地址配置已由后续第 17 节废弃。当前重点配置为：
 
 ```text
 FMLYSYS_ADMIN_USERNAME=admin
 FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=...
 FMLYSYS_WECHAT_APP_ID=...
 FMLYSYS_WECHAT_APP_SECRET=...
-FMLYSYS_WECHAT_REDIRECT_URL=...
 ```
 
 配置解析支持空行、以 `#` 开头的注释、可选 `export ` 前缀以及单/双引号值；格式错误会让启动明确失败并报告文件和行号，避免配置悄悄失效。
 
-管理员密码仍遵守原来的 bootstrap 边界：仅在 `system.db` 尚无管理员时用于创建首个管理员；已有管理员不会因为配置文件内容变化而在每次启动时被自动重置密码。
+管理员密码仍遵守原来的 bootstrap 边界：仅在 `system.db` 尚无管理员时用于创建首个管理员；已有管理员不会因为配置文件内容变化而在每次启动时被自动重置密码。该密码语义后续又在第 16 节扩展为首次创建/忘密重置。
 
 ### 15.3 Windows 启动脚本
 
 `scripts/dev-windows.cmd` 继续负责确定 `%REPO_ROOT%\data`，并在首次运行发现 `data/config.env` 不存在时自动生成模板。脚本不再主动设置默认 `FMLYSYS_ADMIN_USERNAME`，否则环境变量会无意覆盖配置文件中的管理员用户名。
 
-模板包含管理员初始化账号/密码、微信 AppID/AppSecret/回调地址以及可选 Master Key。`data/` 已被 `.gitignore` 整体排除，所以这些本机 Secret 不会随正常 Git 提交进入仓库，但仍应把 `data/config.env` 当作敏感文件管理。
+`data/` 已被 `.gitignore` 整体排除，所以本机 Secret 不会随正常 Git 提交进入仓库，但仍应把 `data/config.env` 当作敏感文件管理。
 
 ### 15.4 验证
 
@@ -567,3 +566,92 @@ Admin credentials: <repo>\data\admin-credentials.enc
 - 旧数据库中的 PBKDF2 `password_hash` 可自动迁移到加密文件，迁移后数据库字段被清空，旧密码仍可正常验证。
 
 本轮没有新增 SQLite schema migration，现有 `data/system.db`、业务 Partition 和 Google Authenticator 绑定可以原地沿用。
+
+## 17. 微信 OAuth 回调地址改为请求动态生成
+
+### 17.1 删除重复的回调地址配置
+
+此前版本把完整 OAuth 回调地址作为 `FMLYSYS_WECHAT_REDIRECT_URL` 配置项。这会让一个本来由代码固定的回调路由同时出现在程序路由和部署配置里，而且换服务器、域名或 IP 时还要同步改 FmlySys 配置，职责重复。
+
+本轮明确新的边界：
+
+```text
+代码固定：/auth/wechat/callback
+部署地址：来自用户实际打开 /login/wechat 时的请求
+```
+
+因此 FmlySys 不再读取 `FMLYSYS_WECHAT_REDIRECT_URL`，也没有新增 `FMLYSYS_PUBLIC_BASE_URL`。当前微信登录的持久配置只需要：
+
+```text
+FMLYSYS_WECHAT_APP_ID
+FMLYSYS_WECHAT_APP_SECRET
+```
+
+旧版 `data/config.env` 中如果已经存在 `FMLYSYS_WECHAT_REDIRECT_URL=...`，新版会将其视为未使用配置，可以直接删除；Windows 新生成的配置模板也不再写入该项。
+
+### 17.2 动态生成规则
+
+用户请求：
+
+```text
+GET /login/wechat
+```
+
+时，FmlySys 现场生成此次 OAuth 的完整 `redirect_uri`：
+
+```text
+当前请求 scheme + 当前请求 Host + /auth/wechat/callback
+```
+
+例如：
+
+```text
+https://family-a.example.com/login/wechat
+→ https://family-a.example.com/auth/wechat/callback
+
+https://family-b.example.com/login/wechat
+→ https://family-b.example.com/auth/wechat/callback
+
+http://192.0.2.10:8080/login/wechat
+→ http://192.0.2.10:8080/auth/wechat/callback
+```
+
+这样同一份程序部署到不同机器、域名或 IP 时，不需要为了 OAuth 回调再次维护一份站点基础 URL。
+
+### 17.3 反向代理与 Host 边界
+
+动态回调只接受：
+
+- `r.Host` 作为回调主机；
+- TLS 连接本身判断 HTTPS；
+- 非直接 TLS 场景允许使用 `X-Forwarded-Proto: http|https` 判断外部协议。
+
+明确不读取 `X-Forwarded-Host`，避免额外 Header 覆盖 OAuth 回调主机。Host 为空、含路径/用户信息符号、空白或控制字符时直接拒绝生成回调 URL；`X-Forwarded-Proto` 不是 `http/https` 时也直接拒绝。
+
+因此使用 Nginx、Caddy 等反向代理时，应让代理保留原始 `Host` 并覆盖/设置正确的 `X-Forwarded-Proto`。微信平台侧仍需要允许实际用于登录的部署域名/回调信息，这是微信侧的 OAuth 安全约束，不应反过来成为 FmlySys 的重复配置。
+
+### 17.4 最终实现方式
+
+本轮最终没有保留额外的“动态回调 middleware”兼容层，而是直接重构原微信登录代码，使运行时回调地址成为显式参数：
+
+1. `Config` 删除 `WeChatRedirectURL` 字段，也不读取 `FMLYSYS_WECHAT_REDIRECT_URL`；
+2. `Config.WeChatConfigured()` 只要求 AppID + AppSecret；
+3. `Server.wechatLogin()` 直接调用 `WeChatCallbackURL(r)`，从本次请求生成完整回调地址；
+4. `wechat.Client` 不再保存 RedirectURL 状态，构造函数只接收 AppID/AppSecret；
+5. `wechat.Client.LoginURL(state, redirectURL)` 每次显式接收当前请求生成的回调地址；
+6. 路由仍由代码固定为 `GET /auth/wechat/callback`；
+7. 微信回跳后的 state 校验、code 换身份、Pending、审核以及成员 Session 流程保持不变。
+
+这样从配置模型、HTTP 层到微信客户端都不存在“空着但仍保留的回调 URL 配置”，部署域名/IP只来自真实请求。
+
+### 17.5 验证
+
+本轮验证包括：
+
+- `internal/config` 独立 `go test` 通过，确认微信只配置 AppID + AppSecret 即为已配置；
+- `internal/wechat` 独立 `go test` 通过，确认 `LoginURL` 使用调用时传入的 runtime redirect URL；
+- 新增 `wechat_redirect_test.go`，覆盖普通 HTTP Host、反向代理 HTTPS、不同域名、不同 IP、非法 `X-Forwarded-Proto`；
+- OAuth 回调路径统一为 `/auth/wechat/callback`；
+- Windows `data/config.env` 模板已删除旧回调 URL 配置项；
+- README 已明确列出固定回调 URI 和动态完整地址生成规则；
+- 本轮不涉及数据库 schema，不需要 migration，也不要求删除现有 `data`。
