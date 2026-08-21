@@ -234,15 +234,9 @@ go run ./cmd/fmlysys
 
 并完成真实 SQLite CRUD 冒烟测试。
 
-## 10. Windows 本地代理启动脚本
+## 10. Windows 本地代理开发启动脚本
 
-为方便 Windows 本地开发环境在需要代理时直接运行 FmlySys，新增：
-
-```text
-scripts/dev-windows.cmd
-```
-
-脚本在当前进程内临时设置：
+为 Windows 本地开发增加 `scripts/dev-windows.cmd`，用于在启动 FmlySys 前设置当前进程临时代理：
 
 ```text
 HTTP_PROXY=http://127.0.0.1:58591
@@ -250,36 +244,52 @@ HTTPS_PROXY=http://127.0.0.1:58591
 ALL_PROXY=socks5://127.0.0.1:51837
 ```
 
-同时设置对应的小写代理变量，提高不同命令行工具的兼容性，并设置：
+同时设置小写代理变量以兼容只读取小写环境变量的命令行工具，并设置：
 
 ```text
 NO_PROXY=127.0.0.1,localhost
 ```
 
-避免本地访问 FmlySys 时经过代理。
+以保证本机开发请求不经过代理。
 
-脚本使用 Windows `setlocal`，因此上述代理变量、`FMLYSYS_ADDR`、`FMLYSYS_DATA_DIR` 等都只对本次脚本及其子进程有效；脚本退出后自动恢复调用脚本前的环境，不写入 Windows 用户环境变量或系统环境变量。
+脚本使用 Windows `setlocal`，因此这些变量只影响该脚本以及由它启动的 Go 子进程，不写入系统或用户永久环境变量。脚本退出后原环境自动恢复。
 
-考虑到当前 Step1 尚未接入正式登录认证，脚本明确设置：
+考虑到 Step1 尚未完成正式登录认证，开发脚本额外固定：
 
 ```text
 FMLYSYS_ADDR=127.0.0.1:8080
 ```
 
-禁止开发启动脚本默认监听所有网卡。
+避免开发态服务误监听全部网卡。脚本还会自动切换到仓库根目录、设置当前项目的 `data` 目录，并在启动前检查 `go` 是否已经加入 `PATH`。
 
-脚本还会：
+## 11. 修复 Windows 首次启动缺失 go.sum
 
-1. 自动切换工作目录到仓库根目录；
-2. 将数据目录设为仓库根目录下的 `data`；
-3. 检查 `go.exe` 是否已经加入 `PATH`；
-4. 执行 `go run ./cmd/fmlysys`；
-5. 将 Go 程序退出码原样返回。
+### 11.1 现象
 
-Windows 本地使用方式：
+Windows 本地执行 `scripts\dev-windows.cmd` 时，`go run ./cmd/fmlysys` 报错：
 
-```bat
-scripts\dev-windows.cmd
+```text
+missing go.sum entry for module providing package modernc.org/sqlite
 ```
 
-由于代理仅为运行时临时环境，用户无需为测试 FmlySys 永久修改 Windows 的 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`。
+仓库当前已经声明 `modernc.org/sqlite v1.34.5`，但尚未在具备真实 Go Module 网络环境的机器上生成 `go.sum`。此前的编译验证使用了临时占位依赖，因此远端仓库并没有真实依赖校验文件。
+
+### 11.2 处理方式
+
+Windows 开发启动脚本现在在 `go run` 之前自动执行：
+
+```text
+go mod download all
+go mod verify
+```
+
+原因：
+
+- `go mod download all` 会在当前临时代理环境下下载主模块构建列表中的真实依赖，并补齐本机需要的 `go.sum` 校验项；
+- `go mod verify` 在启动应用前验证已下载模块内容与校验值一致；
+- 任一步失败都会停止启动，避免把“依赖没准备好”误判成 FmlySys 自身运行错误；
+- 不使用每次启动都执行 `go mod tidy` 的方式，避免开发启动脚本无必要地重写 `go.mod`。
+
+首次成功运行后，本地工作区会生成 `go.sum`。该文件属于正常的 Go Module 依赖锁定/校验文件，后续应在有真实网络依赖解析结果后纳入仓库，以使其他机器不再依赖首次运行时生成。
+
+当前远端执行环境仍不能访问 Go Module 网络，因此没有伪造或手工填写任何 checksum；真实 `go.sum` 由用户本地 Go 工具链通过代理生成。

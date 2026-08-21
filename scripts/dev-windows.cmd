@@ -46,6 +46,29 @@ echo [FmlySys] Listening on http://%FMLYSYS_ADDR%/
 echo [FmlySys] Data directory: %FMLYSYS_DATA_DIR%
 echo.
 
+echo [FmlySys] Preparing Go module dependencies...
+go mod download all
+if errorlevel 1 (
+    echo.
+    echo [FmlySys] Failed to download Go module dependencies.
+    echo [FmlySys] Check that the local proxy is running and the proxy ports are correct.
+    popd >nul
+    endlocal
+    exit /b 1
+)
+
+go mod verify
+if errorlevel 1 (
+    echo.
+    echo [FmlySys] Go module verification failed.
+    popd >nul
+    endlocal
+    exit /b 1
+)
+
+echo [FmlySys] Go module dependencies are ready.
+echo.
+
 go run ./cmd/fmlysys
 set "EXIT_CODE=%ERRORLEVEL%"
 
