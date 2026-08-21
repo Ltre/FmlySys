@@ -17,7 +17,10 @@ import (
 )
 
 func main() {
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
 	ctx := context.Background()
 	pm, err := partition.Open(ctx, cfg.DataDir)
 	if err != nil {
@@ -49,9 +52,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	srv := &http.Server{Addr: cfg.Addr, Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second}
+	handler := httpserver.WithTOTPSetupAlias(app, app.Handler())
+	srv := &http.Server{Addr: cfg.Addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
-		log.Printf("FmlySys listening on %s, partition=%s", cfg.Addr, pm.ActiveID)
+		log.Printf("FmlySys listening on %s, partition=%s, config=%s", cfg.Addr, pm.ActiveID, cfg.ConfigFile)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)
 		}

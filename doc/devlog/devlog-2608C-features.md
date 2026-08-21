@@ -424,3 +424,71 @@ Google Authenticator 绑定二维码由 `github.com/skip2/go-qrcode` 在服务�
 真实微信扫码仍必须在用户自己的微信开放平台网站应用、已审核回调域名以及真实 AppID/AppSecret 下做端到端测试。本地 `localhost` 只能测试 dev login、权限、Pending 数据层和后台 TOTP。
 
 仍未完成的生产级安全/功能边界包括 CSRF token、登录限流/锁定策略、更完整的安全日志、资产事件/转账/报销修改撤销 UI、遗产、提醒、备份/Google Drive/数据分区切换等；因此当前 Step1 仍应先在受控环境测试后再决定部署范围。
+
+## 15. TOTP 密钥别名与 `data/config.env` 本机配置
+
+### 15.1 Google Authenticator 密钥别名
+
+不同测试环境如果都显示成固定的 `FmlySys:admin`，在 Google Authenticator 中很难判断当前验证码属于本机、测试服务器还是正式环境。因此本轮把“环境区分”放在 OTPAuth 的账号标签层，而不是修改 TOTP Secret 或验证码算法。
+
+绑定页新增“密钥别名”输入框：
+
+- 默认值为当前管理员用户名；
+- 可填写例如 `FmlySys 本机测试`、`FmlySys 测试服务器`、`FmlySys 正式环境`；
+- 输入后二维码在约 250ms 防抖后自动刷新；
+- `/admin/totp/qr?alias=...` 只在处于 `totp_setup` 阶段的管理员 Session 中可用；
+- 别名去除首尾空格，最长 80 个字符，并拒绝控制字符；
+- 最终二维码仍使用原 TOTP Secret，只把自定义别名传给现有 `OTPAuthURI()` 作为 account label；
+- 6 位验证码验证不依赖别名，因此别名不需要成为安全凭据，也无需新增数据库字段或 migration。
+
+这样同一管理员可以在不同部署环境中使用不同可读名称，而不会改变 RFC 6238 的验证语义。
+
+### 15.2 `data/config.env`
+
+为了避免 Windows 本地开发每次启动都重新设置管理员初始化账号/密码和微信开发者环境变量，本轮增加：
+
+```text
+data/config.env
+```
+
+程序启动时先根据 `FMLYSYS_DATA_DIR` 确定 data 目录，再读取其中的 `config.env`。配置优先级为：
+
+```text
+环境变量 > data/config.env > 程序默认值
+```
+
+因此：
+
+- 本机测试可以长期把配置写在 `data/config.env`；
+- CI、容器或正式部署仍可以用环境变量覆盖；
+- `FMLYSYS_DATA_DIR` 自身不能从这个文件读取，因为必须先知道 data 目录才能定位配置文件。
+
+当前可从文件读取的现有配置包括管理员初始化信息、微信 OAuth、Master Key、监听地址、开发身份等 `FMLYSYS_*` 键。用户本轮重点需要的配置为：
+
+```text
+FMLYSYS_ADMIN_USERNAME=admin
+FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=...
+FMLYSYS_WECHAT_APP_ID=...
+FMLYSYS_WECHAT_APP_SECRET=...
+FMLYSYS_WECHAT_REDIRECT_URL=...
+```
+
+配置解析支持空行、以 `#` 开头的注释、可选 `export ` 前缀以及单/双引号值；格式错误会让启动明确失败并报告文件和行号，避免配置悄悄失效。
+
+管理员密码仍遵守原来的 bootstrap 边界：仅在 `system.db` 尚无管理员时用于创建首个管理员；已有管理员不会因为配置文件内容变化而在每次启动时被自动重置密码。
+
+### 15.3 Windows 启动脚本
+
+`scripts/dev-windows.cmd` 继续负责确定 `%REPO_ROOT%\data`，并在首次运行发现 `data/config.env` 不存在时自动生成模板。脚本不再主动设置默认 `FMLYSYS_ADMIN_USERNAME`，否则环境变量会无意覆盖配置文件中的管理员用户名。
+
+模板包含管理员初始化账号/密码、微信 AppID/AppSecret/回调地址以及可选 Master Key。`data/` 已被 `.gitignore` 整体排除，所以这些本机 Secret 不会随正常 Git 提交进入仓库，但仍应把 `data/config.env` 当作敏感文件管理。
+
+### 15.4 验证
+
+本轮验证包括：
+
+- `internal/config` 独立 Go 测试通过：确认 `data/config.env` 可以读取、环境变量可以覆盖文件、带空格及 `#` 的双引号密码可以解析；
+- 增加 malformed config 测试，错误行不会被静默忽略；
+- Google Authenticator 别名归一化增加单元测试；
+- 绑定模板使用 Go `html/template` 实际解析和渲染检查，确认 JavaScript 中管理员用户名被正确输出为字符串；
+- 不新增数据库 schema，现有 `system.db` 和业务 Partition 不需要 migration。

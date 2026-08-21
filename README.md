@@ -26,17 +26,61 @@ FMLYSYS_DEV_AUTH_ENABLED=1
 
 因此本地未配置微信开放平台时仍可通过“本地开发身份登录”测试。正式部署必须关闭该变量。
 
-### 首次创建后台管理员
+### `data/config.env` 本机持久配置
 
-在启动脚本前设置：
+Windows 启动脚本会在首次运行时自动创建：
 
-```bat
-set FMLYSYS_ADMIN_USERNAME=admin
-set FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=请换成至少10位的强密码
-scripts\dev-windows.cmd
+```text
+data/config.env
 ```
 
-第一次成功创建管理员以后，可以移除 `FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD`。访问 `/admin/login`，密码验证通过后首次绑定 Google Authenticator，之后每次登录均需要密码 + TOTP。
+该文件位于运行时 `data/` 中，已经被 `.gitignore` 排除，适合保存本机测试环境的管理员初始化信息和微信开发者配置，不需要每次启动前重新执行 `set`。
+
+示例：
+
+```text
+FMLYSYS_ADMIN_USERNAME=admin
+FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=请换成至少10位的强密码
+FMLYSYS_WECHAT_APP_ID=你的AppID
+FMLYSYS_WECHAT_APP_SECRET=你的AppSecret
+FMLYSYS_WECHAT_REDIRECT_URL=https://你的已审核域名/auth/wechat/callback
+FMLYSYS_MASTER_KEY=
+```
+
+读取优先级固定为：
+
+```text
+环境变量 > data/config.env > 程序默认值
+```
+
+因此部署环境仍然可以使用环境变量覆盖本机配置。`FMLYSYS_DATA_DIR` 本身决定配置文件所在目录，所以它只从环境变量/启动脚本取得，不从 `data/config.env` 自己读取。
+
+`data/config.env` 可能包含管理员初始密码和微信 AppSecret，应当视为敏感文件，不要提交、发送或放进公开备份。
+
+### 首次创建后台管理员
+
+如果 `system.db` 还没有管理员，程序会从环境变量或 `data/config.env` 读取：
+
+```text
+FMLYSYS_ADMIN_USERNAME
+FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD
+```
+
+并在启动时创建第一个管理员。密码至少 10 个字符。
+
+这个密码只用于**首次创建管理员**：管理员一旦写入 `system.db`，以后启动不需要再次提供 bootstrap password，也不会因为修改 `data/config.env` 而自动重置已有管理员密码。
+
+访问 `/admin/login`，密码验证通过后首次绑定 Google Authenticator，之后每次登录均需要密码 + TOTP。
+
+首次绑定页提供“密钥别名”输入框。可以使用例如：
+
+```text
+FmlySys 本机测试
+FmlySys 测试服务器
+FmlySys 正式环境
+```
+
+二维码会随别名更新，Google Authenticator 中会以该别名区分不同环境。别名只是 OTPAuth 的账号标签，不参与验证码计算，也不改变 TOTP Secret。
 
 TOTP 密钥使用 AES-256-GCM 加密保存。若未设置 `FMLYSYS_MASTER_KEY`，程序会在 `data/system.key` 自动生成本机主密钥；该文件必须与数据库一并安全备份，且不得提交 Git。
 
@@ -49,6 +93,8 @@ FMLYSYS_WECHAT_APP_ID
 FMLYSYS_WECHAT_APP_SECRET
 FMLYSYS_WECHAT_REDIRECT_URL
 ```
+
+以上三项既可以写入 `data/config.env`，也可以通过环境变量提供。
 
 `FMLYSYS_WECHAT_REDIRECT_URL` 应指向：
 

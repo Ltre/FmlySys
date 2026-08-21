@@ -20,7 +20,6 @@ rem Development is intentionally bound to localhost.
 set "FMLYSYS_ADDR=127.0.0.1:8080"
 rem Local development may use the explicit dev-login button; production must leave this disabled.
 if not defined FMLYSYS_DEV_AUTH_ENABLED set "FMLYSYS_DEV_AUTH_ENABLED=1"
-if not defined FMLYSYS_ADMIN_USERNAME set "FMLYSYS_ADMIN_USERNAME=admin"
 
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "REPO_ROOT=%%~fI"
@@ -31,6 +30,19 @@ if errorlevel 1 goto :pushd_failed
 set "PUSHD_OK=1"
 set "FMLYSYS_DATA_DIR=%REPO_ROOT%\data"
 if not defined FMLYSYS_DEV_MEMBER set "FMLYSYS_DEV_MEMBER=Dev Admin"
+set "FMLYSYS_CONFIG_FILE=%FMLYSYS_DATA_DIR%\config.env"
+
+if not exist "%FMLYSYS_DATA_DIR%" mkdir "%FMLYSYS_DATA_DIR%" >nul 2>&1
+if not exist "%FMLYSYS_CONFIG_FILE%" (
+    >"%FMLYSYS_CONFIG_FILE%" echo # FmlySys local config. Keep this file private; data/ is ignored by Git.
+    >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_ADMIN_USERNAME=admin
+    >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=
+    >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_WECHAT_APP_ID=
+    >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_WECHAT_APP_SECRET=
+    >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_WECHAT_REDIRECT_URL=
+    >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_MASTER_KEY=
+    echo [FmlySys] Created local config template: %FMLYSYS_CONFIG_FILE%
+)
 
 where go >nul 2>&1
 if errorlevel 1 goto :go_missing
@@ -41,9 +53,8 @@ echo [FmlySys] HTTPS_PROXY=%HTTPS_PROXY%
 echo [FmlySys] ALL_PROXY=%ALL_PROXY%
 echo [FmlySys] Listening on http://%FMLYSYS_ADDR%/
 echo [FmlySys] Data directory: %FMLYSYS_DATA_DIR%
+echo [FmlySys] Local config: %FMLYSYS_CONFIG_FILE%
 echo [FmlySys] Local dev login: %FMLYSYS_DEV_AUTH_ENABLED%
-if not defined FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD echo [FmlySys] Admin bootstrap password is not set. Set FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD before the first admin login.
-if not defined FMLYSYS_WECHAT_APP_ID echo [FmlySys] WeChat OAuth is not configured. Local dev login remains available.
 echo.
 
 echo [FmlySys] Tidying Go module metadata...
