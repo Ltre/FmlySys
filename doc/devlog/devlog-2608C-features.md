@@ -315,3 +315,35 @@ dev-windows.cmd
 ```
 
 该调整避免脚本因 CMD / PowerShell 当前目录或资源管理器双击启动时的工作目录不同而错误定位 `go.mod`、`data` 或 `cmd/fmlysys`。
+
+## 13. 修复 go.mod 需 tidy 与双击失败闪退
+
+### 13.1 现象与根因
+
+真实 Windows Go 环境首次完成模块下载和校验后，`go run ./cmd/fmlysys` 仍可能提示：
+
+```text
+go: updates to go.mod needed; to update it:
+        go mod tidy
+```
+
+`go mod download all` 只负责下载模块，`go mod verify` 只负责校验已下载模块；二者都不会替代 `go mod tidy` 对主模块依赖声明和校验信息进行整理。因此此前脚本的依赖准备流程并不完整。
+
+同时，脚本此前在任何失败路径上直接 `exit /b 1`。从资源管理器双击 `.cmd` 时，CMD 窗口会随脚本结束而关闭，导致错误信息闪过后无法阅读。
+
+### 13.2 修复
+
+Windows 开发启动脚本现在统一执行：
+
+```text
+go mod tidy
+go mod download all
+go mod verify
+go run ./cmd/fmlysys
+```
+
+其中 `go mod tidy` 在代理环境已经设置之后执行，因此需要补充依赖时仍使用本地代理。整理完成后再下载完整模块并校验，最后才启动应用。
+
+所有失败路径也统一进入 `:fail`：包括仓库根目录解析失败、无法进入仓库目录、找不到 Go、`go mod tidy` 失败、模块下载失败、模块校验失败以及 `go run` 非零退出。失败时会保留明确错误信息并执行 `pause`，因此即使从资源管理器双击脚本，也不会再因错误直接闪退。
+
+该 `pause` 仅在失败路径执行；正常启动和正常退出不会额外要求按键。
