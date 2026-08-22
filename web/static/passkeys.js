@@ -97,8 +97,8 @@
 
   function friendlyError(error) {
     if (!error) return 'Passkey 操作失败。';
-    if (error.name === 'NotAllowedError') return 'Passkey 操作已取消、超时，或设备没有可用的通行密钥。';
-    if (error.name === 'InvalidStateError') return '这台设备上可能已经为当前成员创建过同一 Passkey。';
+    if (error.name === 'NotAllowedError') return 'Passkey 操作已取消、超时，或当前设备没有可用凭据。若凭据在另一台设备上，请在系统面板选择“使用其他设备”并扫描 FIDO 二维码。';
+    if (error.name === 'InvalidStateError') return '当前设备可能已经为这个登录身份创建过同一 Passkey。';
     if (error.name === 'SecurityError') return '当前地址不满足 Passkey 的安全域要求，请使用 HTTPS 域名访问。';
     if (error.name === 'NotSupportedError') return '当前浏览器或设备不支持所需的 Passkey 能力。';
     return error.message || String(error);
@@ -112,82 +112,119 @@
     node.classList.toggle('is-success', !isError && Boolean(message));
   }
 
-  async function passkeyLogin(button, status) {
-    button.disabled = true;
-    setStatus(status, '正在请求 Passkey…');
-    try {
-      const options = await jsonFetch('/auth/passkey/login/options', { method: 'POST' });
-      const credential = await navigator.credentials.get({ publicKey: decodeRequestOptions(options.publicKey) });
-      if (!credential) throw new Error('没有取得 Passkey 凭据');
-      setStatus(status, '正在验证身份…');
-      const result = await jsonFetch('/auth/passkey/login/finish', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(assertionCredentialJSON(credential))
-      });
-      window.location.assign(result.redirect || '/');
-    } catch (error) {
-      setStatus(status, friendlyError(error), true);
-      button.disabled = false;
-    }
-  }
-
-  function setupLogin() {
-    const button = document.querySelector('[data-passkey-login]');
-    if (!button) return;
-    const status = document.querySelector('[data-passkey-login-status]');
+  function enablePasskeyForm(form, button, status) {
+    if (!form || !button) return false;
     if (!support || !window.isSecureContext) {
       button.disabled = true;
       button.hidden = true;
       setStatus(status, !support ? '当前浏览器不支持 Passkey，请使用微信扫码登录。' : '当前页面不是 HTTPS 安全上下文，Passkey 不可用，请使用微信扫码登录。', true);
-      return;
+      return false;
     }
     button.hidden = false;
     button.disabled = false;
-    button.addEventListener('click', () => passkeyLogin(button, status));
+    return true;
   }
 
-  function setupRegistration() {
-    const form = document.querySelector('[data-passkey-register]');
+  function setupLogin() {
+    const form = document.querySelector('[data-passkey-login]');
     if (!form) return;
-    const status = document.querySelector('[data-passkey-register-status]');
-    const button = form.querySelector('[data-passkey-register-button]');
-    if (!support || !window.isSecureContext) {
-      if (button) {
-        button.disabled = true;
-        button.hidden = true;
+    const button = form.querySelector('[data-passkey-login-button]');
+    const status = form.querySelector('[data-passkey-login-status]');
+    if (!enablePasskeyForm(form, button, status)) return;
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      const phone = form.elements.phone.value.trim();
+      button.disabled = true;
+      setStatus(status, '正在查找该手机号对应的 Passkey 登录身份…');
+      try {
+        const options = await jsonFetch('/auth/passkey/login/options', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone })
+        });
+        setStatus(status, '请使用已有 Passkey 验证。若 Passkey 在设备 A，请选择“使用其他设备”并扫描 FIDO 二维码。');
+        const credential = await navigator.credentials.get({ publicKey: decodeRequestOptions(options.publicKey) });
+        if (!credential) throw new Error('没有取得 Passkey 凭据');
+        setStatus(status, '正在恢复原来的 FmlySys 登录身份…');
+        const result = await jsonFetch('/auth/passkey/login/finish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(assertionCredentialJSON(credential))
+        });
+        window.location.assign(result.redirect || '/passkey/account?recovered=1');
+      } catch (error) {
+        setStatus(status, friendlyError(error), true);
+        button.disabled = false;
       }
-      setStatus(status, !support ? '当前浏览器不支持 Passkey。' : 'Passkey 绑定必须在 HTTPS（或 localhost）安全上下文中进行。', true);
-      return;
-    }
-    if (button) {
-      button.hidden = false;
-      button.disabled = false;
-    }
+    });
+  }
+
+  function setupCreate() {
+    const form = document.querySelector('[data-passkey-create]');
+    if (!form) return;
+    const button = form.querySelector('[data-passkey-create-button]');
+    const status = form.querySelector('[data-passkey-create-status]');
+    if (!enablePasskeyForm(form, button, status)) return;
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      const phone = form.elements.phone.value.trim();
+      const remark = form.elements.remark.value.trim();
+      button.disabled = true;
+      setStatus(status, '正在创建新的 Passkey 登录身份…');
+      try {
+        const options = await jsonFetch('/auth/passkey/create/options', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone, remark })
+        });
+        const credential = await navigator.credentials.create({ publicKey: decodeCreationOptions(options.publicKey) });
+        if (!credential) throw new Error('没有取得新 Passkey 凭据');
+        setStatus(status, '正在保存登录身份…');
+        const result = await jsonFetch('/auth/passkey/create/finish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(creationCredentialJSON(credential))
+        });
+        window.location.assign(result.redirect || '/passkey/account?created=1');
+      } catch (error) {
+        setStatus(status, friendlyError(error), true);
+        button.disabled = false;
+      }
+    });
+  }
+
+  function setupAdd() {
+    const form = document.querySelector('[data-passkey-add]');
+    if (!form) return;
+    const button = form.querySelector('[data-passkey-add-button]');
+    const status = form.querySelector('[data-passkey-add-status]');
+    if (!enablePasskeyForm(form, button, status)) return;
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       if (!form.reportValidity()) return;
       const remark = form.elements.remark.value.trim();
-      if (!remark) return;
       button.disabled = true;
-      setStatus(status, '正在准备 Passkey…');
+      setStatus(status, '正在为当前设备准备新的 Passkey…');
       try {
-        const options = await jsonFetch('/passkeys/register/options', {
+        const options = await jsonFetch('/passkey/account/register/options', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ remark })
         });
         const credential = await navigator.credentials.create({ publicKey: decodeCreationOptions(options.publicKey) });
         if (!credential) throw new Error('没有取得新 Passkey 凭据');
-        setStatus(status, '正在保存 Passkey…');
-        const result = await jsonFetch('/passkeys/register/finish', {
+        setStatus(status, '正在把当前设备 Passkey 加入同一个登录身份…');
+        const result = await jsonFetch('/passkey/account/register/finish', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(creationCredentialJSON(credential))
         });
-        sessionStorage.setItem('fmlyFlash', JSON.stringify({ message: 'Passkey 已绑定。以后可以在登录页直接使用。', type: 'success' }));
-        window.location.assign(result.redirect || '/passkeys');
+        window.location.assign(result.redirect || '/passkey/account');
       } catch (error) {
         setStatus(status, friendlyError(error), true);
         button.disabled = false;
@@ -196,5 +233,6 @@
   }
 
   setupLogin();
-  setupRegistration();
+  setupCreate();
+  setupAdd();
 })();
