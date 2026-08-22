@@ -21,18 +21,8 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/crypto v0.36.0 // indirect
-	golang.org/x/mod v0.16.0 // indirect
 	golang.org/x/sys v0.31.0 // indirect
-	golang.org/x/tools v0.19.0 // indirect
-	modernc.org/cc/v4 v4.21.4 // indirect
-	modernc.org/ccgo/v4 v4.19.2 // indirect
-	modernc.org/fileutil v1.3.0 // indirect
-	modernc.org/gc/v2 v2.4.1 // indirect
 	modernc.org/libc v1.55.3 // indirect
 	modernc.org/mathutil v1.6.0 // indirect
 	modernc.org/memory v1.8.0 // indirect
-	modernc.org/opt v0.1.3 // indirect
-	modernc.org/sortutil v1.2.0 // indirect
-	modernc.org/strutil v1.2.0 // indirect
-	modernc.org/token v1.1.0 // indirect
 )
