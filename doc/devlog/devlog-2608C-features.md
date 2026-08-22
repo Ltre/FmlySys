@@ -857,3 +857,87 @@ SQLite 仍保持 WAL、foreign_keys 和 `busy_timeout=5000`。WAL 允许并发�
 本轮只修改展示与入口交互，不改变 `/admin` 的服务端认证规则：暗操作不是安全控制，知道地址的用户仍可直接访问 `/admin`，随后按现有管理员 Session / 密码 / TOTP 规则认证。真正的安全边界仍由服务端认证保证。
 
 没有数据库 schema 变化，不需要 migration，也不要求删除现有 `data`。
+
+## 21. 移动端交互二次重构、局域网监听与成员删除
+
+### 21.1 移动端从“能看”改为“方便操作”
+
+上一轮主要解决 viewport、单列表单、44px 触控尺寸和表格横向溢出，但复杂后台页面仍需要左右拖动表格，属于“能浏览”而不是“手机上好用”。本轮增加独立的 `web/static/mobile.css` 和全站 DOM 增强：
+
+- 前台、后台业务页面都加载同一份 `app.js`；7 连击后台暗操作仍只绑定带 `data-admin-tap` 的前台 Header，不会在后台累计点击；
+- JS 读取每个业务表格的表头，在窄屏下把数据行转换成“字段名 + 字段值”的纵向记录卡，资产、消费、内部转账、报销、事务、审计、后台代管情况等不再依赖横向拖动；
+- `colspan` 的“暂无记录”行使用单独的空状态卡，不生成无意义字段标签；
+- 后台成员权限操作自动整理为保存/删除两类明确按钮，在手机上可双列或进一步单列；
+- Pending 审核、权限 checkbox、嵌套表单继续保持单列和大触控区域；
+- 文件上传后显示已选文件数量及最多前三个文件名，减少手机文件选择器返回页面后的不确定感；
+- 登录、申请加入、管理员登录、TOTP 绑定和验证页也显式加载 `mobile.css`，因此不依赖业务导航模板才能获得移动端适配；
+- 420px 以下进一步收紧表格卡片字段列和按钮排列，覆盖较窄 Android 浏览器。
+
+这种实现保留桌面端原生表格，不复制两套业务模板；手机端只改变呈现方式，字段仍来自同一 HTML 表格，所以后续新增表格列会自动带入移动端标签。
+
+### 21.2 支持局域网 IP 和域名访问
+
+`http://10.0.0.27:8080/` 无法打开的根因是 Windows 开发启动脚本把 `FMLYSYS_BIND_HOST` 固定为 `127.0.0.1`，Go 服务只监听回环网卡，与路由、Cookie 或 Host 校验无关。
+
+本轮把 `scripts/win-dev.start.cmd` 的开发监听改为：
+
+```text
+FMLYSYS_BIND_HOST=0.0.0.0
+FMLYSYS_PORT=8080
+```
+
+因此同一个进程可以通过 `localhost:8080`、本机局域网 IPv4（例如 `10.0.0.27:8080`）以及解析到该机器的域名访问。FmlySys 的 `http.Server` 不设置 Host 白名单，微信 OAuth 的完整回调地址仍按实际登录请求的 scheme + Host 动态生成，不需要额外维护域名/IP列表。
+
+如果另一台设备仍无法访问，下一层应检查 Windows Defender 防火墙是否允许该 TCP 端口入站；应用启动脚本只负责监听所有本机 IPv4 接口，不自动修改系统防火墙规则。Linux 阿里云启动脚本原本已经使用 `0.0.0.0`，本轮无需重复修改。
+
+### 21.3 成员智能删除
+
+新增增量 migration：
+
+```text
+migrations/partition/000004_member_soft_delete.sql
+```
+
+给 `members` 增加 `is_del INTEGER NOT NULL DEFAULT 0`。后台成员权限卡增加“删除成员”，提交仍经过已认证后台请求处理。
+
+删除前区分两类数据：
+
+1. **可清理的认证状态**：`member_permissions`、`member_sessions`、`wechat_identities.member_id`。这些不会因为存在就强制软删除；删除成员时统一清理权限和 Session、解绑微信身份，并把对应已审核 join request 重置为 draft，使原微信身份以后可以重新申请/绑定。
+2. **必须保留的历史关联**：成员在资产事件、事务、公共消费、内部转账、报销、资料、附件、支付凭证或 `audit_logs.actor_member_id` 中被引用。只要任一存在，就不能破坏外键和历史事实，执行软删除。
+
+软删除执行：
+
+```text
+members.is_del = 1
+members.status = 'deleted'
+```
+
+正常 `Members()` 原本就只列出 `status='active'`，所以软删成员立即从新增消费、转账对象、事务负责人、Pending 绑定目标等正常成员选择中退出；其历史业务记录仍可通过原外键显示姓名。
+
+如果没有任何持久业务/审计引用，在清理认证状态后直接 `DELETE FROM members`。数据库仍启用 foreign_keys，因此关联检测即使未来漏掉新表，物理删除也会被 SQLite 外键阻止，而不是静默留下孤儿数据。
+
+系统使用的开发审计身份 `DevActorID` 禁止删除，防止后台自身审计主体被误删。
+
+### 21.4 删除成员不改变历史账务
+
+软删成员可能仍有历史代管余额。若公共资产汇总继续只遍历 active members，删除成员会让 `HolderTotalCent` 突然少一块，从而制造账务差额。因此新增 `MembersForAccounting()`：
+
+- 普通业务下拉和权限管理仍只使用 active members；
+- `AssetSummaryV2()` 单独使用 accounting member 集合；
+- `is_del=1` 的历史成员仍参与 `HolderBalanceV2()` 计算；
+- 持有人列表中若其历史余额非 0，以 `姓名（已删除）` 显示，明确这是历史代管事实而不是当前可操作成员。
+
+这样成员生命周期与资金事实分离，删除成员不会伪造资产流出或改变既有账务恒等式。
+
+### 21.5 验证与兼容边界
+
+本轮执行/检查：
+
+- `000004_member_soft_delete.sql` 在内存 SQLite 上实际执行成功，旧成员自动得到 `is_del=0`；
+- 新增成员删除测试覆盖“无业务引用物理删除”“有资产引用软删除”“微信/Session/权限清理”“软删成员仍进入 accounting member 集合”“系统审计身份禁止删除”；
+- 新增 Store 删除实现和 HTTP 删除中间层分别用最小 stub 做 Go 编译检查；
+- `web/static/app.js` 通过 Node.js `--check` 语法检查；
+- 修改后的 dashboard/login/join/admin-login/admin-totp/admin-totp-setup 模板通过 Go `html/template` 解析检查；
+- Windows 开发脚本已明确输出 localhost、LAN/domain 访问方式及防火墙边界。
+
+当前执行环境没有仓库依赖缓存，无法在这里跑依赖 `modernc.org/sqlite` 的完整仓库 `go test ./...`；对应正式测试文件已经提交，用户本地启动脚本会先执行 `go mod tidy/download/verify`，随后可在完整依赖环境中执行测试。该限制不影响已完成的 migration 实际 SQLite 验证、Go 新文件语法/编译隔离检查和前端语法检查。

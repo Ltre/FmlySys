@@ -296,7 +296,7 @@ func (s *Store) HolderBalanceV2(ctx context.Context, memberID int64) (int64, err
 }
 
 func (s *Store) AssetSummaryV2(ctx context.Context) (AssetSummary, error) {
-	members, err := s.Members(ctx)
+	members, err := s.MembersForAccounting(ctx)
 	if err != nil {
 		return AssetSummary{}, err
 	}

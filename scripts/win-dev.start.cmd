@@ -17,7 +17,8 @@ set "NO_PROXY=127.0.0.1,localhost"
 set "no_proxy=%NO_PROXY%"
 
 rem Listener settings: FMLYSYS_PORT is the single source of truth for the server port.
-set "FMLYSYS_BIND_HOST=127.0.0.1"
+rem 0.0.0.0 listens on every local IPv4 interface so localhost, LAN IPs and hostnames can reach the same server.
+set "FMLYSYS_BIND_HOST=0.0.0.0"
 set "FMLYSYS_PORT=8080"
 rem Local development may use the explicit dev-login button; production must leave this disabled.
 set "FMLYSYS_DEV_AUTH_ENABLED=1"
@@ -55,7 +56,9 @@ echo [FmlySys] HTTPS_PROXY=%HTTPS_PROXY%
 echo [FmlySys] ALL_PROXY=%ALL_PROXY%
 echo [FmlySys] Bind host: %FMLYSYS_BIND_HOST%
 echo [FmlySys] Port: %FMLYSYS_PORT%
-echo [FmlySys] Listening on http://%FMLYSYS_BIND_HOST%:%FMLYSYS_PORT%/
+echo [FmlySys] Local URL: http://localhost:%FMLYSYS_PORT%/
+echo [FmlySys] LAN/domain URL: http://^<this-machine-ip-or-domain^>:%FMLYSYS_PORT%/
+echo [FmlySys] If another device still cannot connect, allow inbound TCP %FMLYSYS_PORT% in Windows Firewall.
 echo [FmlySys] Data directory: %FMLYSYS_DATA_DIR%
 echo [FmlySys] Local config: %FMLYSYS_CONFIG_FILE%
 echo [FmlySys] Admin credentials: %FMLYSYS_ADMIN_CREDENTIALS%

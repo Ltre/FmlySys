@@ -1,0 +1,171 @@
+/* Mobile interaction layer. Loaded after app.css on every functional page. */
+.member-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 118px;
+}
+.member-actions > button { width: 100%; }
+.file-selection {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #5f6368;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  body { width: 100%; overflow-x: hidden; }
+  .wrap { width: 100%; max-width: none; }
+  .card { width: 100%; overflow: visible; }
+
+  /* Keep touch controls easy to hit even in nested/administrative forms. */
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea,
+  button,
+  .button-like,
+  .secondary-button {
+    min-height: 46px;
+    font-size: 16px;
+  }
+  .form,
+  .pending-card .form,
+  .member-permission-card,
+  .permission-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .form > button,
+  .form > .button-like,
+  .form > .secondary-button,
+  .pending-card button {
+    width: 100%;
+  }
+  .permission-grid label {
+    min-height: 44px;
+    padding: 5px 2px;
+  }
+  .member-actions {
+    width: 100%;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  /* Tables become labelled record cards; no horizontal dragging is required. */
+  .responsive-table {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow: visible !important;
+    border-collapse: separate;
+  }
+  .responsive-table tbody {
+    display: grid;
+    width: 100%;
+    gap: 10px;
+  }
+  .responsive-table .responsive-table-head { display: none; }
+  .responsive-table .responsive-table-row {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    border: 1px solid #e3e5e8;
+    border-radius: 10px;
+    background: #fff;
+    overflow: hidden;
+  }
+  .responsive-table .responsive-table-row > td {
+    display: grid;
+    grid-template-columns: minmax(86px, 30%) minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    width: 100%;
+    min-width: 0 !important;
+    max-width: none !important;
+    padding: 10px 12px;
+    border-bottom: 1px solid #edf0f3;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .responsive-table .responsive-table-row > td:last-child { border-bottom: 0; }
+  .responsive-table .responsive-table-row > td::before {
+    content: attr(data-label);
+    color: #73777f;
+    font-size: 12px;
+    line-height: 1.45;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  .responsive-table .responsive-table-row > td.responsive-empty {
+    display: block;
+    text-align: center;
+    color: #73777f;
+  }
+  .responsive-table .responsive-table-row > td.responsive-empty::before { content: none; }
+  .responsive-table form,
+  .responsive-table .actions {
+    width: 100%;
+  }
+  .responsive-table select,
+  .responsive-table input,
+  .responsive-table button {
+    max-width: 100%;
+  }
+  .responsive-table .audit-json {
+    width: 100%;
+    max-width: 100%;
+    max-height: 220px;
+  }
+
+  .section-head { gap: 10px; }
+  .pending-card,
+  .member-permission-card { overflow: hidden; }
+  .reject-form { display: grid !important; grid-template-columns: 1fr; }
+  .reject-form > * { width: 100%; }
+  .attachment {
+    max-width: 100%;
+    white-space: normal;
+    word-break: break-all;
+  }
+  .upload input[type="file"] { width: 100%; }
+
+  .auth-wrap {
+    width: 100%;
+    min-height: 100svh;
+    padding: 12px 10px 24px;
+    align-items: start;
+  }
+  .auth-card {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+  }
+  .auth-card .button-like,
+  .auth-card button { width: 100%; }
+  .qr-box img { width: min(256px, 78vw); }
+  .secret,
+  .secret code,
+  #totp-uri { max-width: 100%; overflow-wrap: anywhere; word-break: break-all; }
+
+  .fold-panel {
+    position: static;
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+    margin-top: 10px;
+    box-shadow: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .member-actions { grid-template-columns: 1fr; }
+  .responsive-table .responsive-table-row > td {
+    grid-template-columns: 78px minmax(0, 1fr);
+    gap: 8px;
+    padding: 9px 10px;
+  }
+  .auth-wrap { padding-left: 8px; padding-right: 8px; }
+}
