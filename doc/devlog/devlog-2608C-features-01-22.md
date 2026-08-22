@@ -1,0 +1,1040 @@
+# dev-2608C-step1 开发记录
+
+日期：2026-08-21  
+分支：`dev-2608C-step1`
+
+## 1. Step1 总体目标与既有实现
+
+Step1 采用 Go + SQLite 单体架构，业务数据位于独立数据分区，当前默认结构：
+
+```text
+data/
+├── system.db
+└── partitions/
+    └── p_default/
+        ├── fmlysys.db
+        └── uploads/
+```
+
+此前已完成公共资产、家族事务、信息共享三条基础业务线，以及 Windows 本地代理开发启动脚本。核心原则保持不变：
+
+- 公共财产为虚拟账本，不对应真实家族金融账户；
+- 按成员记录当前代管的公共财产总额，不记录其具体银行卡/微信/支付宝余额；
+- 存资金事实，不把 before/current/after balance 作为权威字段；
+- 内部转账只改变双方代管金额，不改变公共财产净额；
+- 消费发生时即影响公共财产净额，报销只结清待报销债务，不再次扣减净额；
+- 金额修改允许直接修正当前有效记录，但必须保留 Audit；
+- 事务采用通用 Matter，资料采用 Archive + Attachment。
+
+当前账务一致性仍按：
+
+```text
+所有成员当前代管公共财产合计 - 待报销金额 = 公共财产净额
+```
+
+## 2. Windows 本地开发脚本历史
+
+`scripts/dev-windows.cmd` 已完成：
+
+- 临时设置 `HTTP_PROXY=http://127.0.0.1:58591`；
+- 临时设置 `HTTPS_PROXY=http://127.0.0.1:58591`；
+- 临时设置 `ALL_PROXY=socks5://127.0.0.1:51837`；
+- 同时设置对应小写变量及 `NO_PROXY=127.0.0.1,localhost`；
+- 使用 `setlocal`，不污染 Windows 永久环境变量；
+- 通过 `%~dp0` 从脚本自身位置解析仓库根目录，因此根目录调用、进入 scripts 后运行、资源管理器双击均可；
+- 启动前依次执行 `go mod tidy`、`go mod download all`、`go mod verify`；
+- 失败统一 `pause`，避免双击窗口闪退；
+- Step1 未完成正式认证前固定监听 `127.0.0.1:8080`。
+
+## 3. 本轮：前后台公共资产职责重构
+
+### 3.1 前台 `/assets`
+
+前台定位调整为普通成员日常操作页，不再承担管理员配置职责。
+
+移出前台：
+
+- 成员新增/管理；
+- 完整版“登记公共资产”；
+- 初始资产；
+- 财务调整；
+- 任意指定 A → B 的管理员内部转账。
+
+前台保留并简化：
+
+- 当前登录成员自己的资产新增；
+- 当前登录成员自己的资产减少；
+- 公共消费；
+- 与其他成员的转账；
+- 报销；
+- 公共资产/消费/转账/报销流水查看。
+
+当前仍处 Step1 开发态，所谓“登录成员”由 `ActorID` 对应的开发成员模拟；正式微信身份接入后这些前台操作将直接绑定真实 session member_id。
+
+### 3.2 后台 `/admin`
+
+后台由占位页升级为公共资产完整版管理页，包括：
+
+- 成员管理；
+- 完整资产变动登记；
+- 任意成员的公共消费登记；
+- 任意成员间内部转账；
+- 指定报销付款持有人；
+- 全部资产变动、消费、转账、报销流水。
+
+正式管理员密码 + Google Authenticator TOTP 仍属于下一阶段认证工作；当前 `/admin` 仍仅用于本地开发验证，不应公开部署。
+
+## 4. 资产变动语义
+
+### 4.1 初始资产 `INITIAL_ASSET`
+
+定义为“系统开始记账时，该成员已经代管的公共财产起始值”。
+
+本轮增加硬约束：**每个成员最多只有一条有效初始资产记录**。
+
+新增 migration 在创建唯一索引前会处理既有异常数据：如果某成员已经存在多条有效 `INITIAL_ASSET`，保留最早一条，其余自动改为 `ASSET_IN`，避免升级旧数据库失败。
+
+### 4.2 资产新增 `ASSET_IN`
+
+定义为系统开始记账以后，新的公共资产流入某成员手中。成员已有初始资产后，后续流入一律使用资产新增。
+
+### 4.3 资产划出 `ASSET_OUT`
+
+本轮明确其业务边界：
+
+> 公共财产退出共同资产体系，而不是普通消费，也不是家族成员之间的代管转移。
+
+典型场景包括：
+
+- 退回当初资金来源者；
+- 撤资；
+- 经协商后将某笔原本进入公共财产的资金退出共同资产。
+
+后台允许 `ASSET_OUT` 通过 `related_event_id` 关联该持有人此前的 `INITIAL_ASSET` / `ASSET_IN` 流入记录，形成“原始流入 → 退出/退回”的证据链。前台成员自己的资产减少保持简化，不强制选择来源记录，但要求填写说明。
+
+### 4.4 财务调整 `ADJUSTMENT`
+
+定义为盘点、校对、纠错时的账面修正，不代表一次真实收付款。
+
+- 仅后台提供；
+- 金额允许正数或负数；
+- UI 要求填写调整原因；
+- 不应替代普通资产流入、资产划出、消费或内部转账。
+
+## 5. 公共消费简化：取消用户选择 funding_type
+
+前台和后台均不再显示：
+
+- 实际付款人（与经手人重复）；
+- `funding_type` 选择；
+- “直接支出时选择持有人”。
+
+业务规则统一为：
+
+> 经手人 = 付款人 = 直接支出人。
+
+数据库旧字段 `payer_member_id`、`funding_type`、`holder_member_id` 暂时保留，以保证已经生成的 SQLite 数据可增量升级，不做破坏性重建；**新业务计算不再要求用户提供 funding_type**。
+
+本轮新增 `public_paid_amount_cent`，系统自动拆分一笔消费中实际由经手人代管公共资产承担的部分和需要报销的部分。
+
+例如：
+
+```text
+经手人当前代管：¥1000
+本次公共消费：¥1200
+```
+
+自动得到：
+
+```text
+public_paid_amount_cent = ¥1000
+reimbursable_amount_cent = ¥200
+```
+
+无需用户判断“直接公共资产”还是“个人垫付”。
+
+如果经手人代管余额足够，则全部从其代管公共资产扣减、待报销为 0；余额不足则只使用可用代管金额，差额自动形成待报销。
+
+消费修改时同样重新校验可由公共资产承担的金额，并保证新的应报销金额不能小于已经完成的报销总额。
+
+## 6. 支付/转账渠道标准化
+
+消费、内部转账、报销统一只提供以下渠道：
+
+- 支付宝；
+- 微信；
+- 银行；
+- 现金；
+- 其它。
+
+Store 层同步校验，不能仅靠 HTML select 防止构造非法请求。
+
+## 7. 支付/转账凭证
+
+新增通用 `record_attachments`，用于：
+
+- `expense`：支付凭证；
+- `transfer`：转账凭证；
+- `reimbursement`：报销转账凭证。
+
+规则：
+
+- 一个业务记录支持多个文件；
+- 单文件最大 10MB；
+- 一次最多 20 个文件，防止异常请求无限占用资源；
+- 图片支持 jpg/jpeg/png/gif/webp/bmp/heic/heif；
+- 文档支持 PDF、TXT、DOC/DOCX、XLS/XLSX、PPT/PPTX；
+- 文件内容计算 SHA-256；
+- 磁盘文件名使用 hash 前缀 + 时间戳，不直接信任用户文件名；
+- 数据保存在当前 Partition 的 `uploads/evidence/`；
+- 数据库保存原始文件名、MIME、大小、SHA-256、上传者等元数据；
+- 上传前先完成数量、扩展名和 FileHeader 大小校验；
+- 写文件/写附件表在附件保存阶段使用事务及失败清理；
+- 下载通过 `/evidence/{id}` Handler，不直接静态暴露目录。
+
+Archive 原有附件仍保持独立逻辑和原开发期限制，本轮没有把信息共享附件强行改为 10MB。
+
+## 8. 前台内部转账
+
+前台不再出现“转出人 / 转入人”两个管理员式下拉框。
+
+当前登录成员只需：
+
+1. 选择方向：`接收自` / `转给`；
+2. 选择另一个成员；
+3. 输入金额；
+4. 选择标准转账渠道；
+5. 可选日期时间，留空取当前时间；
+6. 可选关联事务与说明；
+7. 上传多个转账凭证。
+
+服务端根据 ActorID 和方向自动确定 from/to，客户端不能借前台表单任意指定双方。
+
+后台仍保留完整 A → B 指定能力。
+
+## 9. 报销
+
+报销渠道使用固定五项，并支持多文件转账凭证。
+
+前台报销默认由当前登录成员的代管公共资产支付；后台允许管理员明确指定报销付款持有人。
+
+报销继续保持原账务规则：
+
+- 不得超过该消费剩余待报销额；
+- 报销付款持有人的可用代管额必须足够；
+- 报销只减少付款持有人代管额和待报销，不二次减少公共财产净额。
+
+## 10. 消费详情 / 编辑页
+
+`/assets/expenses/{id}/edit` 从单纯编辑表单升级为消费详情页：
+
+- 显示消费金额、经手人/付款人；
+- 显示无需报销 / 待报销 / 已全额报销状态；
+- 显示支付凭证；
+- 显示该消费全部报销流水及对应转账凭证；
+- 尚有待报销金额时显示“报销”操作；
+- 显示 `audit_logs` 中该消费的创建/修改记录；
+- 修改前/后 JSON 公开展示，便于家族成员核对历史修正。
+
+## 11. Migration
+
+新增：
+
+```text
+migrations/partition/000002_asset_ui_and_evidence.sql
+```
+
+该 migration：
+
+- 规范化历史重复初始资产；
+- 为 `asset_events` 增加 `related_event_id`；
+- 为 `public_expenses` 增加 `public_paid_amount_cent`；
+- 按旧 `funding_type` 回填历史消费的 public-paid 金额；
+- 为每成员一条有效初始资产增加 partial unique index；
+- 创建通用 `record_attachments` 及索引。
+
+本轮没有修改已经执行过的 `000001_init.sql`，以保证用户现有 `data/partitions/p_default/fmlysys.db` 可以直接通过 migration 升级，不要求删库重建。
+
+## 12. 本轮验证
+
+当前执行环境仍无法联网获取仓库及真实 Go Module，因此采用与此前一致的编译隔离方式验证本轮新增代码：
+
+- 新增 Store 业务代码通过 `gofmt`；
+- 新增 HTTP Server 路由/handler 在完整接口 stub 下通过 Go 编译；
+- `assets.html`、`admin.html`、`expense-edit.html` 与模板 FuncMap 通过 ParseFS 测试；
+- 新增 payment channel 单元测试通过；
+- 新增凭证文件类型/10MB 限制单元测试通过；
+- 使用 Python 标准库 SQLite 对 `000002_asset_ui_and_evidence.sql` 做实际 SQL 执行验证，migration 语法及 ALTER/索引/新表创建成功。
+
+本轮新增测试：
+
+```text
+internal/store/assets_v2_test.go
+internal/store/evidence_test.go
+```
+
+用户 Windows 环境已经生成真实 `go.mod` indirect dependencies / `go.sum`；本轮提交以远端最新分支为 base，不覆盖这些本地真实依赖结果。
+
+正式合并或继续下一阶段前，建议用户本地再次执行：
+
+```bat
+scripts\dev-windows.cmd
+```
+
+并实际完成：初始资产 → 资产新增 → 部分公共资产消费/自动待报销 → 成员转账 → 报销 → 凭证下载 → 消费审计的完整 SQLite 冒烟测试。
+
+## 13. 当时仍未完成的生产边界
+
+以下条目记录的是上一轮结束时的状态，其中微信成员认证和后台 TOTP 已在后续第 14 节完成：
+
+- 微信正式成员身份与加入审核；
+- `/admin` 管理员密码 + Google Authenticator TOTP；
+- CSRF；
+- 正式 RBAC / Archive ACL；
+- 资产事件/内部转账/报销的修改与逻辑撤销 UI；
+- 完整 Audit 浏览与筛选；
+- 遗产模块；
+- 提醒；
+- 备份包、Google Drive、外部备份导入及 Partition 切换。
+
+## 14. 微信成员认证、Pending 审核、权限与后台 TOTP
+
+### 14.1 前台成员身份
+
+本轮将前台从开发态固定 `ActorID` 切换为服务器端成员 Session。正式页面 `/`、`/assets`、`/matters`、`/share` 均要求有效成员 Session；本地开发仅在 `FMLYSYS_DEV_AUTH_ENABLED=1` 时提供显式“本地开发身份登录”，正式部署必须关闭。
+
+微信网站扫码流程使用开放平台 `snsapi_login`：
+
+```text
+/login/wechat
+→ 微信扫码授权
+→ /auth/wechat/callback
+→ 已绑定 member_id：创建成员 Session
+→ 未绑定：进入 /join
+```
+
+OAuth 使用随机 `state` Cookie 校验，AppSecret 仅保留在服务端环境变量。微信身份与业务成员分离：业务表继续只引用内部 `member_id`。
+
+### 14.2 Pending 加入家族
+
+新增业务分区表：
+
+```text
+wechat_identities
+join_requests
+member_permissions
+member_sessions
+```
+
+未知微信身份不会直接看到家族数据，而是获得短期 join token，填写真实姓名与关系后进入 `pending`。后台 `/admin` 显示 Pending 列表，管理员可以：
+
+- 绑定到已有成员；或
+- 新建成员；
+- 同时勾选该成员权限；
+- 审核通过或拒绝。
+
+审核通过后 `wechat_identities.member_id` 指向内部成员；用户重新扫码即可创建正式 Session。拒绝后允许用户再次扫码并重新提交。
+
+### 14.3 成员权限
+
+当前权限粒度：
+
+```text
+assets.view
+assets.self_change
+expenses.create
+expenses.edit
+transfers.create
+reimbursements.create
+matters.view
+matters.manage
+share.view
+share.manage
+```
+
+后台既可在审核 Pending 时设置权限，也可后续对已有成员修改权限。权限在每次请求时从数据库读取，不把权限长期固化进 Cookie，因此后台修改后无需用户重新登录即可生效。
+
+前台不仅隐藏无权限控件，服务端路由也执行权限检查。普通成员新增公共消费时，经手人/付款人由当前成员 Session 强制绑定，不能通过篡改表单指定他人。`admin` 可见共享资料不再通过普通成员路径返回或下载。
+
+### 14.4 公共资产页面
+
+恢复公开的“公共资产持有人”列表，展示各成员当前代管公共财产总额；仍不展示任何个人真实银行卡、微信、支付宝或现金账户明细。
+
+“我的公共资产变动”从独立大区块改为持有人列表右上角的“登记我的资产变动”折叠入口：桌面端展开为列表角落浮层，移动端展开为正常块级面板，明确提示该入口只用于公共资产流入/退出，不是公共消费。
+
+### 14.5 多文件凭证
+
+再次确认前台三处均使用 `multipart/form-data + multiple`，后端 `ParseMultipartForm` 后读取同名 `evidence` 的全部 `FileHeader`，并逐个交给 `SaveEvidenceFiles` 保存：
+
+- 新增公共消费：支付凭证；
+- 与其他成员转账：转账凭证；
+- 登记报销：转账凭证。
+
+保持单文件 10MB、一次最多 20 个文件以及既有图片/办公文档白名单。请求解析上限提高到 220MB，避免 20 个接近 10MB 的合法文件在 multipart 解析阶段被过早拒绝。
+
+### 14.6 后台管理员密码 + Google Authenticator
+
+新增 system.db 表：
+
+```text
+admin_users
+admin_sessions
+```
+
+首次管理员不提供匿名 Web setup 页面。若 system.db 尚无管理员，可通过：
+
+```text
+FMLYSYS_ADMIN_USERNAME
+FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD
+```
+
+在启动时创建。密码验证成功后：首次进入 TOTP 绑定流程，服务端生成 160-bit Base32 Secret，并生成 `otpauth://` URI 与本地二维码；绑定完成后，以后每次后台登录均为“密码 → Google Authenticator 6 位 TOTP → authenticated session”。
+
+TOTP 实现遵循 RFC 6238：HMAC-SHA1、6 位、30 秒 timestep、允许 ±1 timestep 时钟漂移，并记录最后成功 timestep 防止同一验证码重放。TOTP Secret 使用 AES-256-GCM 加密后存入 system.db；主密钥来自 `FMLYSYS_MASTER_KEY`，未配置时自动生成 `data/system.key`。
+
+后台 Session 与普通成员 Session 使用不同 Cookie 与不同数据库，互不混用。
+
+### 14.7 新 migration 与依赖
+
+新增：
+
+```text
+migrations/partition/000003_member_auth_permissions.sql
+migrations/system/000002_admin_auth.sql
+```
+
+均为增量 migration，不要求删除现有 `data`。
+
+Google Authenticator 绑定二维码由 `github.com/skip2/go-qrcode` 在服务端本地生成，不依赖第三方在线二维码服务；对应模块校验已加入 `go.sum`。
+
+### 14.8 本轮验证与剩余边界
+
+已检查/验证：
+
+- 微信 OAuth state、code 换身份及 Pending 状态机代码路径；
+- 成员 Session 使用随机 256-bit token，数据库只保存 SHA-256 token hash；
+- TOTP 使用 RFC 6238 官方测试向量；
+- TOTP 重放拒绝；
+- 后台密码 hash/verify 单元测试；
+- 两个新增 SQLite migration 的建表/索引结构；
+- 三处凭证均为多文件 HTML 控件并贯通现有多文件后端；
+- 后台 Pending/成员权限页面与服务端 handler 字段一致；
+- 无权限的事务管理、消费编辑、报销操作在 UI 与路由两层收口。
+
+真实微信扫码仍必须在用户自己的微信开放平台网站应用、已审核回调域名以及真实 AppID/AppSecret 下做端到端测试。本地 `localhost` 只能测试 dev login、权限、Pending 数据层和后台 TOTP。
+
+仍未完成的生产级安全/功能边界包括 CSRF token、登录限流/锁定策略、更完整的安全日志、资产事件/转账/报销修改撤销 UI、遗产、提醒、备份/Google Drive/数据分区切换等；因此当前 Step1 仍应先在受控环境测试后再决定部署范围。
+
+## 15. TOTP 密钥别名与 `data/config.env` 本机配置
+
+### 15.1 Google Authenticator 密钥别名
+
+不同测试环境如果都显示成固定的 `FmlySys:admin`，在 Google Authenticator 中很难判断当前验证码属于本机、测试服务器还是正式环境。因此本轮把“环境区分”放在 OTPAuth 的账号标签层，而不是修改 TOTP Secret 或验证码算法。
+
+绑定页新增“密钥别名”输入框：
+
+- 默认值为当前管理员用户名；
+- 可填写例如 `FmlySys 本机测试`、`FmlySys 测试服务器`、`FmlySys 正式环境`；
+- 输入后二维码在约 250ms 防抖后自动刷新；
+- `/admin/totp/qr?alias=...` 只在处于 `totp_setup` 阶段的管理员 Session 中可用；
+- 别名去除首尾空格，最长 80 个字符，并拒绝控制字符；
+- 最终二维码仍使用原 TOTP Secret，只把自定义别名传给现有 `OTPAuthURI()` 作为 account label；
+- 6 位验证码验证不依赖别名，因此别名不需要成为安全凭据，也无需新增数据库字段或 migration。
+
+这样同一管理员可以在不同部署环境中使用不同可读名称，而不会改变 RFC 6238 的验证语义。
+
+### 15.2 `data/config.env`
+
+为了避免 Windows 本地开发每次启动都重新设置管理员初始化账号/密码和微信开发者环境变量，本轮增加：
+
+```text
+data/config.env
+```
+
+程序启动时先根据 `FMLYSYS_DATA_DIR` 确定 data 目录，再读取其中的 `config.env`。配置优先级为：
+
+```text
+环境变量 > data/config.env > 程序默认值
+```
+
+因此：
+
+- 本机测试可以长期把配置写在 `data/config.env`；
+- CI、容器或正式部署仍可以用环境变量覆盖；
+- `FMLYSYS_DATA_DIR` 自身不能从这个文件读取，因为必须先知道 data 目录才能定位配置文件。
+
+当前可从文件读取的现有配置包括管理员初始化信息、微信 OAuth、Master Key、监听地址、开发身份等 `FMLYSYS_*` 键。该节记录的是当时版本；微信回调地址配置已由后续第 17 节废弃。当前重点配置为：
+
+```text
+FMLYSYS_ADMIN_USERNAME=admin
+FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=...
+FMLYSYS_WECHAT_APP_ID=...
+FMLYSYS_WECHAT_APP_SECRET=...
+```
+
+配置解析支持空行、以 `#` 开头的注释、可选 `export ` 前缀以及单/双引号值；格式错误会让启动明确失败并报告文件和行号，避免配置悄悄失效。
+
+管理员密码仍遵守原来的 bootstrap 边界：仅在 `system.db` 尚无管理员时用于创建首个管理员；已有管理员不会因为配置文件内容变化而在每次启动时被自动重置密码。该密码语义后续又在第 16 节扩展为首次创建/忘密重置。
+
+### 15.3 Windows 启动脚本
+
+`scripts/dev-windows.cmd` 继续负责确定 `%REPO_ROOT%\data`，并在首次运行发现 `data/config.env` 不存在时自动生成模板。脚本不再主动设置默认 `FMLYSYS_ADMIN_USERNAME`，否则环境变量会无意覆盖配置文件中的管理员用户名。
+
+`data/` 已被 `.gitignore` 整体排除，所以本机 Secret 不会随正常 Git 提交进入仓库，但仍应把 `data/config.env` 当作敏感文件管理。
+
+### 15.4 验证
+
+本轮验证包括：
+
+- `internal/config` 独立 Go 测试通过：确认 `data/config.env` 可以读取、环境变量可以覆盖文件、带空格及 `#` 的双引号密码可以解析；
+- 增加 malformed config 测试，错误行不会被静默忽略；
+- Google Authenticator 别名归一化增加单元测试；
+- 绑定模板使用 Go `html/template` 实际解析和渲染检查，确认 JavaScript 中管理员用户名被正确输出为字符串；
+- 不新增数据库 schema，现有 `system.db` 和业务 Partition 不需要 migration。
+
+## 16. 管理员密码移出数据库
+
+### 16.1 目标与边界
+
+本轮按新的安全/可恢复性要求调整管理员密码存储：**管理员密码以及密码摘要均不再以有效数据形式保存在 `system.db` 中**。数据库继续保存管理员身份、启停状态、TOTP Secret（加密）、TOTP 状态和后台 Session，但密码验证改为独立本机文件。
+
+新的密码凭据文件固定为：
+
+```text
+data/admin-credentials.enc
+```
+
+文件不会保存明文密码。内部先生成 PBKDF2-SHA256 密码摘要，再把包含用户名、摘要、版本号和更新时间的 JSON 凭据整体使用 AES-256-GCM 加密。加密仍复用当前 `data/system.key` 或 `FMLYSYS_MASTER_KEY` 派生的主密钥。
+
+这意味着即使查看 `admin-credentials.enc` 原始内容，也看不到用户名、PBKDF2 标记或密码摘要；密码比对时由服务端先解密凭据，再执行原有 PBKDF2 常量时间比较。
+
+### 16.2 为什么不直接增加“清空 password_hash”的 migration
+
+现有 `migrations/system/000002_admin_auth.sql` 中已经存在 `password_hash TEXT NOT NULL`。不能简单新增 migration 在数据库打开时立刻把它清空，因为 migration 会早于管理员认证服务初始化执行：如果先清空，旧安装的密码摘要还没有机会搬到文件中，会造成管理员不可登录。
+
+因此本轮采用启动期安全迁移：
+
+1. 启动并打开既有 `system.db`；
+2. 如果 `data/admin-credentials.enc` 不存在，检查旧 `admin_users.password_hash`；
+3. 如果 `data/config.env` 临时提供了新密码，则优先使用新密码生成摘要，等同于一次忘密重置；否则直接迁移旧 PBKDF2 摘要；
+4. 使用临时文件 + rename 写入并确认 `admin-credentials.enc` 成功；
+5. 最后才把数据库中的旧 `password_hash` 更新为空字符串。
+
+旧列暂时仅作为 schema 兼容壳保留，新代码创建管理员时从第一天起只向该列写空字符串。以后如果整体重建 system schema，再考虑物理删除该历史列；当前不为删列承担 SQLite 表重建风险。
+
+### 16.3 忘记密码后的恢复
+
+`FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD` 的语义扩展为“首次创建 / 本机密码重置”。如果管理员已经存在、加密凭据文件也存在，但 `data/config.env` 中临时填写的新密码与当前摘要不一致，启动时会：
+
+- 为新密码生成新的 PBKDF2-SHA256 摘要；
+- 重写 `data/admin-credentials.enc`；
+- 删除已有后台 Session，避免旧已登录 Session 在密码重置后继续存活；
+- 保留 `system.db`、TOTP Secret、TOTP 绑定和全部家族数据。
+
+所以忘记密码时不需要删除数据库。操作流程为：
+
+```text
+编辑 data/config.env
+→ FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=新的至少10位密码
+→ 重启 FmlySys
+→ 用新密码 + 原 Google Authenticator 验证码登录
+→ 确认成功后把该配置重新清空
+```
+
+如果凭据文件丢失但数据库中还有旧版本密码摘要，程序会自动迁移；如果凭据文件和旧摘要都不存在，则启动会明确提示在 `data/config.env` 临时设置新密码，而不是要求删库。
+
+### 16.4 文件一致性与 Windows
+
+凭据写入使用同目录临时文件、flush/sync 后再 rename，尽量避免进程中断产生半文件。考虑 Windows 对已有目标文件 rename 替换的行为差异，第一次 rename 失败时只删除旧的 `admin-credentials.enc` 后重试，不触碰 `system.db` 或其它 data 文件。
+
+Windows 开发脚本同步显示：
+
+```text
+Admin credentials: <repo>\data\admin-credentials.enc
+```
+
+并在 `data/config.env` 模板中明确说明密码行只用于首次创建或重置，成功后建议清空。
+
+### 16.5 验证
+
+`internal/adminauth/adminauth_test.go` 新增覆盖：
+
+- 新管理员创建后数据库 `password_hash` 必须为空；
+- 正确密码可以通过加密凭据文件完成验证，错误密码拒绝；
+- `admin-credentials.enc` 原始密文中不出现明文密码、`pbkdf2-sha256` 或 JSON `password_hash` 字段；
+- 修改配置密码并再次执行启动初始化逻辑，可在不删除数据库的情况下重置密码；
+- 旧数据库中的 PBKDF2 `password_hash` 可自动迁移到加密文件，迁移后数据库字段被清空，旧密码仍可正常验证。
+
+本轮没有新增 SQLite schema migration，现有 `data/system.db`、业务 Partition 和 Google Authenticator 绑定可以原地沿用。
+
+## 17. 微信 OAuth 回调地址改为请求动态生成
+
+### 17.1 删除重复的回调地址配置
+
+此前版本把完整 OAuth 回调地址作为 `FMLYSYS_WECHAT_REDIRECT_URL` 配置项。这会让一个本来由代码固定的回调路由同时出现在程序路由和部署配置里，而且换服务器、域名或 IP 时还要同步改 FmlySys 配置，职责重复。
+
+本轮明确新的边界：
+
+```text
+代码固定：/auth/wechat/callback
+部署地址：来自用户实际打开 /login/wechat 时的请求
+```
+
+因此 FmlySys 不再读取 `FMLYSYS_WECHAT_REDIRECT_URL`，也没有新增 `FMLYSYS_PUBLIC_BASE_URL`。当前微信登录的持久配置只需要：
+
+```text
+FMLYSYS_WECHAT_APP_ID
+FMLYSYS_WECHAT_APP_SECRET
+```
+
+旧版 `data/config.env` 中如果已经存在 `FMLYSYS_WECHAT_REDIRECT_URL=...`，新版会将其视为未使用配置，可以直接删除；Windows 新生成的配置模板也不再写入该项。
+
+### 17.2 动态生成规则
+
+用户请求：
+
+```text
+GET /login/wechat
+```
+
+时，FmlySys 现场生成此次 OAuth 的完整 `redirect_uri`：
+
+```text
+当前请求 scheme + 当前请求 Host + /auth/wechat/callback
+```
+
+例如：
+
+```text
+https://family-a.example.com/login/wechat
+→ https://family-a.example.com/auth/wechat/callback
+
+https://family-b.example.com/login/wechat
+→ https://family-b.example.com/auth/wechat/callback
+
+http://192.0.2.10:8080/login/wechat
+→ http://192.0.2.10:8080/auth/wechat/callback
+```
+
+这样同一份程序部署到不同机器、域名或 IP 时，不需要为了 OAuth 回调再次维护一份站点基础 URL。
+
+### 17.3 反向代理与 Host 边界
+
+动态回调只接受：
+
+- `r.Host` 作为回调主机；
+- TLS 连接本身判断 HTTPS；
+- 非直接 TLS 场景允许使用 `X-Forwarded-Proto: http|https` 判断外部协议。
+
+明确不读取 `X-Forwarded-Host`，避免额外 Header 覆盖 OAuth 回调主机。Host 为空、含路径/用户信息符号、空白或控制字符时直接拒绝生成回调 URL；`X-Forwarded-Proto` 不是 `http/https` 时也直接拒绝。
+
+因此使用 Nginx、Caddy 等反向代理时，应让代理保留原始 `Host` 并覆盖/设置正确的 `X-Forwarded-Proto`。微信平台侧仍需要允许实际用于登录的部署域名/回调信息，这是微信侧的 OAuth 安全约束，不应反过来成为 FmlySys 的重复配置。
+
+### 17.4 最终实现方式
+
+本轮最终没有保留额外的“动态回调 middleware”兼容层，而是直接重构原微信登录代码，使运行时回调地址成为显式参数：
+
+1. `Config` 删除 `WeChatRedirectURL` 字段，也不读取 `FMLYSYS_WECHAT_REDIRECT_URL`；
+2. `Config.WeChatConfigured()` 只要求 AppID + AppSecret；
+3. `Server.wechatLogin()` 直接调用 `WeChatCallbackURL(r)`，从本次请求生成完整回调地址；
+4. `wechat.Client` 不再保存 RedirectURL 状态，构造函数只接收 AppID/AppSecret；
+5. `wechat.Client.LoginURL(state, redirectURL)` 每次显式接收当前请求生成的回调地址；
+6. 路由仍由代码固定为 `GET /auth/wechat/callback`；
+7. 微信回跳后的 state 校验、code 换身份、Pending、审核以及成员 Session 流程保持不变。
+
+这样从配置模型、HTTP 层到微信客户端都不存在“空着但仍保留的回调 URL 配置”，部署域名/IP只来自真实请求。
+
+### 17.5 验证
+
+本轮验证包括：
+
+- `internal/config` 独立 `go test` 通过，确认微信只配置 AppID + AppSecret 即为已配置；
+- `internal/wechat` 独立 `go test` 通过，确认 `LoginURL` 使用调用时传入的 runtime redirect URL；
+- 新增 `wechat_redirect_test.go`，覆盖普通 HTTP Host、反向代理 HTTPS、不同域名、不同 IP、非法 `X-Forwarded-Proto`；
+- OAuth 回调路径统一为 `/auth/wechat/callback`；
+- Windows `data/config.env` 模板已删除旧回调 URL 配置项；
+- README 已明确列出固定回调 URI 和动态完整地址生成规则；
+- 本轮不涉及数据库 schema，不需要 migration，也不要求删除现有 `data`。
+
+## 18. 服务监听端口统一与 Linux 阿里云香港启动脚本
+
+### 18.1 端口配置只保留一个权威来源
+
+此前服务监听地址存在两层默认值：Windows 启动脚本直接设置 `FMLYSYS_ADDR=127.0.0.1:8080`，同时 `internal/config` 又把 `127.0.0.1:8080` 作为代码 fallback。这样即使修改了某一处，绕过脚本启动或配置失效时仍可能悄悄回落到 8080，形成多个端口来源。
+
+本轮把监听配置重新拆成：
+
+```text
+FMLYSYS_BIND_HOST
+FMLYSYS_PORT
+```
+
+其中 `FMLYSYS_PORT` 是服务监听端口的唯一权威来源。`internal/config` 不再包含 8080 或其他端口默认值，也不再读取旧的 `FMLYSYS_ADDR`。程序只从**进程环境变量**读取 `FMLYSYS_PORT`，并要求值为 `1-65535` 的整数；缺失或非法时直接拒绝启动。
+
+`FMLYSYS_BIND_HOST` 同样由启动环境提供。最终 `http.Server.Addr` 只由：
+
+```text
+net.JoinHostPort(FMLYSYS_BIND_HOST, FMLYSYS_PORT)
+```
+
+计算得到，不再让业务配置文件保存另一份监听地址。
+
+为了确保启动脚本是真正的配置入口，即使用户在 `data/config.env` 中手工写入 `FMLYSYS_PORT`，`internal/config` 也不会采用；必须由启动脚本/进程环境提供。这样调整端口时只需要修改对应环境的启动脚本。
+
+### 18.2 Windows 开发启动脚本
+
+当前 Windows 脚本名称已经是：
+
+```text
+scripts/win-dev.start.cmd
+```
+
+本轮在脚本顶部集中定义：
+
+```text
+FMLYSYS_BIND_HOST=127.0.0.1
+FMLYSYS_PORT=8080
+FMLYSYS_DEV_AUTH_ENABLED=1
+```
+
+以后 Windows 开发环境修改端口只改 `FMLYSYS_PORT` 一行。脚本输出也拆成 Bind host / Port / Listening，避免再通过一个拼好的 `FMLYSYS_ADDR` 隐藏端口来源。
+
+原有 Windows 行为保持：本地 HTTP/HTTPS/SOCKS 代理、仓库根目录解析、`data/config.env` 模板、Go 可用性检查、`go mod tidy`、`go mod download all`、`go mod verify`、`go run ./cmd/fmlysys` 以及失败暂停。
+
+### 18.3 Linux 阿里云香港启动脚本
+
+新增：
+
+```text
+scripts/linux-alyhk.start.cmd
+```
+
+文件后缀沿用项目现有启动脚本命名，但内容是带 `#!/usr/bin/env bash` 的 Bash 脚本，并以 executable mode 提交。默认监听配置：
+
+```text
+FMLYSYS_BIND_HOST=0.0.0.0
+FMLYSYS_PORT=8080
+FMLYSYS_DEV_AUTH_ENABLED=0
+```
+
+与 Windows 脚本保持同一启动流程：
+
+1. 根据脚本自身位置定位仓库根目录；
+2. 设置 `FMLYSYS_DATA_DIR=<repo>/data`；
+3. 创建缺失的 `data/config.env` 模板并尽量设置为 `0600`；
+4. 检查 `go` 是否存在；
+5. 执行 `go mod tidy`；
+6. 执行 `go mod download all`；
+7. 执行 `go mod verify`；
+8. 执行 `go run ./cmd/fmlysys`；
+9. 任一步失败时输出明确错误并以非 0 状态退出。
+
+Linux 服务器脚本不会写入 Windows 开发机的 `127.0.0.1:58591` / `51837` 代理配置，并默认关闭 dev login。若实际服务器前面由 Nginx/Caddy 本机反代，可按部署需要把 `FMLYSYS_BIND_HOST` 改成 `127.0.0.1`；端口仍只改脚本中的 `FMLYSYS_PORT`。
+
+### 18.4 文档与兼容边界
+
+README 已切换到 `scripts/win-dev.start.cmd`，新增 Linux 脚本用法，并从当前环境变量说明中删除旧 `FMLYSYS_ADDR`。历史开发记录中早期出现的 `scripts/dev-windows.cmd` 或 8080 示例保留为当时事实，不代表当前运行时仍存在代码 fallback。
+
+本轮没有修改 `data/config.env` 的既有业务/认证字段，也没有数据库 schema 变化，因此不需要 migration，不需要删除 `data`。
+
+### 18.5 验证
+
+本轮验证包括：
+
+- `internal/config` 独立 `go test` 通过；
+- 验证 `FMLYSYS_PORT=18080` 可生成 `127.0.0.1:18080`；
+- 验证只在 `data/config.env` 写端口而没有进程环境变量时仍拒绝启动；
+- 验证端口缺失、`70000` 等非法端口会拒绝启动；
+- 验证 `FMLYSYS_BIND_HOST` 缺失会拒绝启动；
+- `scripts/linux-alyhk.start.cmd` 通过 `bash -n`；
+- 使用 fake `go` 对 Linux 脚本做启动流程冒烟测试，确认仓库根目录解析、配置模板生成以及 `tidy → download → verify → run` 调用顺序正确；
+- Linux 脚本冒烟测试确认默认 `FMLYSYS_DEV_AUTH_ENABLED=0`，不会把 Windows 本地开发登录带到服务器环境。
+
+## 19. 本地开发登录 Pending 与管理员密钥失配恢复
+
+### 19.1 `/login/dev` Pending 根因
+
+`POST /login/dev` 本身只创建成员 Session、写 Cookie，并以 303 重定向到首页；真正卡住的是重定向后的首页业务读取。开发身份拥有全部成员权限，包括 `share.view`，因此首页会读取 `FamilyArchives()`。
+
+`FamilyArchives()` 在外层 `archives` 查询得到的 `*sql.Rows` 尚未释放时，会逐条调用 `Attachments()` 再执行一条 SQLite 查询。此前 `internal/db.Open()` 强制：
+
+```text
+SetMaxOpenConns(1)
+```
+
+这会形成确定性的连接池自锁：外层 Rows 占住唯一连接，内层附件查询等待第二条连接，而唯一连接只有外层 Rows 结束后才会释放。只要存在至少一条 family archive，浏览器就会看到登录导航长时间 pending。这不是 `/login/dev` HTTP Handler 本身慢，也不是网络问题。
+
+本轮移除单连接限制，改成有边界的小连接池：
+
+```text
+MaxOpenConns = 8
+MaxIdleConns = 4
+ConnMaxIdleTime = 5 minutes
+```
+
+SQLite 仍保持 WAL、foreign_keys 和 `busy_timeout=5000`。WAL 允许并发读取，冲突写入仍由 SQLite 自身和 busy timeout 约束；连接数也没有无限放开。
+
+同时给普通页面/认证请求增加 15 秒 request context deadline，作为数据库路径的第二道防线。Multipart 上传以及 `/files/`、`/evidence/` 文件传输不套用该 15 秒 deadline，避免合法大文件传输被误杀。
+
+### 19.2 `cipher: message authentication failed` 根因与恢复
+
+该错误不是“管理员密码错误”，而是 AES-GCM 的消息认证失败：当前运行时使用的主密钥无法验证已有密文。FmlySys 的 `data/admin-credentials.enc` 以及 `system.db` 中的 TOTP Secret 都使用 `data/system.key` 或 `FMLYSYS_MASTER_KEY` 对应的主密钥加密，所以以下情况都会导致该错误：
+
+- `data/system.key` 被删除后重新生成；
+- `FMLYSYS_MASTER_KEY` 被修改；
+- 把 `system.db` / `admin-credentials.enc` 从另一环境复制过来，但没有同步原主密钥；
+- 数据文件和密钥来自不同备份时间点。
+
+本轮不再把底层 `cipher: message authentication failed` 原样暴露给登录页，而是增加启动期可恢复检测：
+
+1. 如果未配置 `FMLYSYS_MASTER_KEY`，`data/system.key` 缺失但 `admin-credentials.enc` 仍存在，程序不会静默生成一把新密钥继续运行；
+2. 没有恢复密码时，程序明确要求恢复原 `system.key`，或者在 `data/config.env` 临时设置 `FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD`；
+3. 已提供本机重置密码且管理员凭据因主密钥失配无法解密时，用该密码重新生成 PBKDF2 摘要，并用当前主密钥重建 `admin-credentials.enc`，同时清除旧后台 Session；
+4. 启动时同步检查已有 TOTP Secret 是否能由当前主密钥解密；
+5. 如果 TOTP Secret 仍可解密，保持现有 Google Authenticator 绑定不变；
+6. 如果 TOTP Secret 也属于旧主密钥，只有在本机恢复密码存在且能通过当前凭据验证时，才清空旧 TOTP 密文、`totp_confirmed` 和 `last_totp_step`，让管理员下次登录重新绑定 Google Authenticator；
+7. 不删除 `system.db`，不删除业务 Partition，也不影响家族业务数据。
+
+对于非 GCM 密钥失配的其它损坏（例如密文格式本身损坏），仍然明确报错，不把任何加密错误都当成可以静默重置的情况。
+
+### 19.3 验证与兼容边界
+
+本轮新增回归测试覆盖：
+
+- 外层 SQLite Rows 尚未关闭时，嵌套读取仍能在 1 秒 context 内完成，防止重新引入单连接自锁；
+- 普通 HTTP 请求会获得有限 deadline；
+- 使用另一把主密钥启动且提供本地恢复密码时，管理员密码凭据可以重建；
+- 同一场景下旧 TOTP Secret 无法解密时会安全重置 TOTP 绑定，管理员密码仍可验证；
+- 主密钥失配但没有本地恢复密码时返回包含恢复操作的明确错误，而不是裸 `cipher:`。
+
+登录页顺便删除了已经废弃的 `FMLYSYS_WECHAT_REDIRECT_URL` 提示，只保留当前实际需要的 AppID/AppSecret。
+
+本轮没有数据库 schema 变化，不需要 migration，也不要求删除现有 `data`。用户升级后应先保留 `data/config.env` 中已经填写的 `FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD`，启动一次完成必要的凭据/TOTP 恢复；确认新密码可登录并完成可能出现的 Google Authenticator 重新绑定后，再将该明文重置密码清空。
+
+## 20. 前台后台入口暗操作与全站移动端适配
+
+### 20.1 后台入口改为 7 连击暗操作
+
+前台不再显示任何可见的后台入口：顶部导航删除“后台”，登录页删除“管理员后台”直达链接，普通成员查看消费详情时也不再在页面底部暴露 `/admin`。
+
+前台公共导航新增无文案暗操作：在顶部 header/nav 的非交互区域（例如 FmlySys 品牌区域或空白处）连续快速点击 7 次，即通过 `window.open('/admin', '_blank')` 新开页面进入后台。实现位于 `web/static/app.js`，只在前台导航分支加载；后台导航不会挂载该行为。
+
+为避免用户正常操作导航时误触：
+
+- 点击链接、按钮、表单、输入框、下拉框、label、summary 不计入次数；
+- 相邻点击间隔超过 700ms 时从 1 次重新计数；
+- 第 7 次点击直接在当前用户手势事件里执行 `window.open`，降低被浏览器弹窗拦截的概率；
+- 使用 `noopener,noreferrer`，避免新后台页持有原前台页面的 `window.opener`；
+- 达到 7 次后立即清零，不在页面上显示提示或计数。
+
+后台自身改为独立可见导航语义：显示“FmlySys · 后台”、后台总览、前台首页、管理员用户名和退出后台。管理员从后台进入消费详情时仍可返回管理后台；普通成员对应页面只显示“返回公共资产”。
+
+### 20.2 移动端适配策略
+
+本轮没有给每个页面复制一套手机 CSS，而是重构公共 `web/static/app.css`，让首页、公共资产、事务、共享、消费详情、登录/加入、管理员登录、TOTP 绑定/验证及完整后台统一继承响应式行为。
+
+主要规则：
+
+- 导航在窄屏改为两层布局：品牌/账户在第一行，业务导航在第二行可横向触控滚动，避免整条 header 被挤出屏幕；
+- 表单在手机宽度统一降为单列，input/select/textarea/主要按钮占满可用宽度；
+- 输入控件和按钮移动端最小触控高度统一为 44px；
+- radio 业务选择卡在手机改为单列大触控卡，不再挤成过窄的多列；
+- `section-head`、后台 Pending 审核、成员权限卡在窄屏转为纵向堆叠；
+- 权限 checkbox 行扩大触控高度；
+- 多列流水表在手机保持语义表格，但变为内部横向滚动区域，避免整页产生横向溢出；
+- 长说明、附件名、审计 JSON、Secret/代码文本允许换行或内部滚动，不再撑破卡片；
+- “登记我的资产变动”桌面仍保持角落浮层，手机则改为卡片内正常展开，避免绝对定位超出屏幕；
+- Google Authenticator 二维码按屏幕宽度缩放；
+- 登录/认证卡在手机从垂直居中改为靠上布局，减少软键盘弹起后内容被遮挡；
+- 380px 以下进一步收紧边距、标题和账户名显示，覆盖小尺寸 Android 浏览器。
+
+响应式适配以公共组件为边界，因此后台后续新增使用 `.form`、`.card`、`.grid`、`.actions`、`.permission-grid` 等现有组件的功能，也会自动获得同一套移动端行为。
+
+### 20.3 验证与边界
+
+本轮静态核对了当前全部模板的布局模式，确认功能界面均使用统一 viewport 和公共 CSS；新增 JS 只依赖浏览器标准 DOM API，不引入前端框架或第三方依赖。重点检查了前台导航、后台长表单、成员权限、Pending 审核、资产/消费/转账/报销多列表格、消费审计、认证卡和 TOTP 二维码等窄屏高风险区域。
+
+本轮只修改展示与入口交互，不改变 `/admin` 的服务端认证规则：暗操作不是安全控制，知道地址的用户仍可直接访问 `/admin`，随后按现有管理员 Session / 密码 / TOTP 规则认证。真正的安全边界仍由服务端认证保证。
+
+没有数据库 schema 变化，不需要 migration，也不要求删除现有 `data`。
+
+## 21. 移动端交互二次重构、局域网监听与成员删除
+
+### 21.1 移动端从“能看”改为“方便操作”
+
+上一轮主要解决 viewport、单列表单、44px 触控尺寸和表格横向溢出，但复杂后台页面仍需要左右拖动表格，属于“能浏览”而不是“手机上好用”。本轮增加独立的 `web/static/mobile.css` 和全站 DOM 增强：
+
+- 前台、后台业务页面都加载同一份 `app.js`；7 连击后台暗操作仍只绑定带 `data-admin-tap` 的前台 Header，不会在后台累计点击；
+- JS 读取每个业务表格的表头，在窄屏下把数据行转换成“字段名 + 字段值”的纵向记录卡，资产、消费、内部转账、报销、事务、审计、后台代管情况等不再依赖横向拖动；
+- `colspan` 的“暂无记录”行使用单独的空状态卡，不生成无意义字段标签；
+- 后台成员权限操作自动整理为保存/删除两类明确按钮，在手机上可双列或进一步单列；
+- Pending 审核、权限 checkbox、嵌套表单继续保持单列和大触控区域；
+- 文件上传后显示已选文件数量及最多前三个文件名，减少手机文件选择器返回页面后的不确定感；
+- 登录、申请加入、管理员登录、TOTP 绑定和验证页也显式加载 `mobile.css`，因此不依赖业务导航模板才能获得移动端适配；
+- 420px 以下进一步收紧表格卡片字段列和按钮排列，覆盖较窄 Android 浏览器。
+
+这种实现保留桌面端原生表格，不复制两套业务模板；手机端只改变呈现方式，字段仍来自同一 HTML 表格，所以后续新增表格列会自动带入移动端标签。
+
+### 21.2 支持局域网 IP 和域名访问
+
+`http://10.0.0.27:8080/` 无法打开的根因是 Windows 开发启动脚本把 `FMLYSYS_BIND_HOST` 固定为 `127.0.0.1`，Go 服务只监听回环网卡，与路由、Cookie 或 Host 校验无关。
+
+本轮把 `scripts/win-dev.start.cmd` 的开发监听改为：
+
+```text
+FMLYSYS_BIND_HOST=0.0.0.0
+FMLYSYS_PORT=8080
+```
+
+因此同一个进程可以通过 `localhost:8080`、本机局域网 IPv4（例如 `10.0.0.27:8080`）以及解析到该机器的域名访问。FmlySys 的 `http.Server` 不设置 Host 白名单，微信 OAuth 的完整回调地址仍按实际登录请求的 scheme + Host 动态生成，不需要额外维护域名/IP列表。
+
+如果另一台设备仍无法访问，下一层应检查 Windows Defender 防火墙是否允许该 TCP 端口入站；应用启动脚本只负责监听所有本机 IPv4 接口，不自动修改系统防火墙规则。Linux 阿里云启动脚本原本已经使用 `0.0.0.0`，本轮无需重复修改。
+
+### 21.3 成员智能删除
+
+新增增量 migration：
+
+```text
+migrations/partition/000004_member_soft_delete.sql
+```
+
+给 `members` 增加 `is_del INTEGER NOT NULL DEFAULT 0`。后台成员权限卡增加“删除成员”，提交仍经过已认证后台请求处理。
+
+删除前区分两类数据：
+
+1. **可清理的认证状态**：`member_permissions`、`member_sessions`、`wechat_identities.member_id`。这些不会因为存在就强制软删除；删除成员时统一清理权限和 Session、解绑微信身份，并把对应已审核 join request 重置为 draft，使原微信身份以后可以重新申请/绑定。
+2. **必须保留的历史关联**：成员在资产事件、事务、公共消费、内部转账、报销、资料、附件、支付凭证或 `audit_logs.actor_member_id` 中被引用。只要任一存在，就不能破坏外键和历史事实，执行软删除。
+
+软删除执行：
+
+```text
+members.is_del = 1
+members.status = 'deleted'
+```
+
+正常 `Members()` 原本就只列出 `status='active'`，所以软删成员立即从新增消费、转账对象、事务负责人、Pending 绑定目标等正常成员选择中退出；其历史业务记录仍可通过原外键显示姓名。
+
+如果没有任何持久业务/审计引用，在清理认证状态后直接 `DELETE FROM members`。数据库仍启用 foreign_keys，因此关联检测即使未来漏掉新表，物理删除也会被 SQLite 外键阻止，而不是静默留下孤儿数据。
+
+系统使用的开发审计身份 `DevActorID` 禁止删除，防止后台自身审计主体被误删。
+
+### 21.4 删除成员不改变历史账务
+
+软删成员可能仍有历史代管余额。若公共资产汇总继续只遍历 active members，删除成员会让 `HolderTotalCent` 突然少一块，从而制造账务差额。因此新增 `MembersForAccounting()`：
+
+- 普通业务下拉和权限管理仍只使用 active members；
+- `AssetSummaryV2()` 单独使用 accounting member 集合；
+- `is_del=1` 的历史成员仍参与 `HolderBalanceV2()` 计算；
+- 持有人列表中若其历史余额非 0，以 `姓名（已删除）` 显示，明确这是历史代管事实而不是当前可操作成员。
+
+这样成员生命周期与资金事实分离，删除成员不会伪造资产流出或改变既有账务恒等式。
+
+### 21.5 验证与兼容边界
+
+本轮执行/检查：
+
+- `000004_member_soft_delete.sql` 在内存 SQLite 上实际执行成功，旧成员自动得到 `is_del=0`；
+- 新增成员删除测试覆盖“无业务引用物理删除”“有资产引用软删除”“微信/Session/权限清理”“软删成员仍进入 accounting member 集合”“系统审计身份禁止删除”；
+- 新增 Store 删除实现和 HTTP 删除中间层分别用最小 stub 做 Go 编译检查；
+- `web/static/app.js` 通过 Node.js `--check` 语法检查；
+- 修改后的 dashboard/login/join/admin-login/admin-totp/admin-totp-setup 模板通过 Go `html/template` 解析检查；
+- Windows 开发脚本已明确输出 localhost、LAN/domain 访问方式及防火墙边界。
+
+当前执行环境没有仓库依赖缓存，无法在这里跑依赖 `modernc.org/sqlite` 的完整仓库 `go test ./...`；对应正式测试文件已经提交，用户本地启动脚本会先执行 `go mod tidy/download/verify`，随后可在完整依赖环境中执行测试。该限制不影响已完成的 migration 实际 SQLite 验证、Go 新文件语法/编译隔离检查和前端语法检查。
+
+## 22. 首页公共资产捷径、消费报销语义与统一表单交互
+
+### 22.1 首页公共资产快捷入口
+
+首页业务卡片区在“近期事务”旁新增“公共资产”卡片。卡片继续遵守现有成员权限，只在拥有 `assets.view` 时出现，并展示公共财产净额和当前待报销金额。快捷入口按权限分别提供：
+
+- `记录一笔消费` → `/assets#new-expense`，仅 `expenses.create` 可见；
+- `报销` → `/assets#reimbursement`，仅 `reimbursements.create` 可见；
+- `查看消费记录` → `/assets#expense-records`。
+
+公共资产页为这些目标区块增加稳定锚点和滚动间距，因此桌面和手机都可以直接落到对应业务区域。
+
+### 22.2 自动报销、后续报销与待报销语义
+
+本轮没有改变消费的资金计算，也没有新增重复账务事实。此前 `CreateExpenseAuto()` 已经在消费发生时按经手人当前代管余额自动拆分：
+
+```text
+public_paid_amount_cent = min(消费金额, 经手人消费前代管余额)
+reimbursable_amount_cent = 消费金额 - public_paid_amount_cent
+```
+
+问题只出在展示层：原页面只显示 `reimbursements` 中后续登记的金额和剩余待报销，没有把 `public_paid_amount_cent` 解释为消费发生瞬间完成的“自动报销”。本轮统一定义：
+
+```text
+自动报销 = 消费金额 - reimbursable_amount_cent
+后续报销 = reimbursements 有效记录合计
+已报销合计 = 自动报销 + 后续报销
+待报销 = reimbursable_amount_cent - 后续报销
+```
+
+例如经手人原代管 ¥1000、公共消费 ¥9000，页面现在明确显示：自动报销 ¥1000、已报销合计 ¥1000、待报销 ¥8000。后续如果再报销 ¥3000，则显示后续报销 ¥3000、已报销合计 ¥4000、待报销 ¥5000。
+
+`Expense` 增加只读计算方法用于模板展示，不新增数据库字段，也不改变 HolderBalance/Net/Pending 的权威计算。
+
+### 22.3 消费流水一键进入报销
+
+公共资产页的消费流水中，只要 `PendingCent > 0` 且当前成员拥有 `reimbursements.create`，报销列会显示“报销”按钮。点击后：
+
+1. 自动把 `#reimbursement-expense` 选择为该消费 ID；
+2. 平滑滚动到“登记报销”；
+3. 给报销卡片短暂高亮，明确当前操作目标；
+4. 将焦点放到待报销消费下拉框，键盘/屏幕阅读器也能直接继续操作。
+
+这只是前端便捷定位；实际金额上限、付款持有人余额等仍由现有 Store 校验，不绕过服务端业务规则。
+
+### 22.4 前后台统一增强表单交互
+
+此前前台资产表单以及后台多项管理表单一旦发生校验错误，会直接由 `http.Error` 返回纯文本页面；成功后则 303 跳转，用户缺少明确的提交中、成功和错误反馈。本轮新增渐进增强协议：
+
+- `app.js` 对正常业务 POST 表单使用 `FormData + fetch`；
+- 请求携带 `X-Fmly-Async: 1`，服务端 `WithEnhancedFormResponses` 只对这种请求把既有 Handler 的 303/错误响应转换成 JSON；
+- 后端 Handler、权限校验、金额校验和实际写库逻辑完全复用，不重新实现一套 API；
+- 校验失败时停留在原页面，在当前表单顶部展示后端原始错误，已填写字段和已选择文件不丢失；
+- 提交期间按钮进入“提交中…”状态并防止重复提交；
+- 成功时保存短期页面提示，再根据服务端原 303 目标刷新数据；回到页面后显示可关闭成功 Toast；
+- 前台资产变动、消费、内部转账、报销、消费编辑，以及后台成员、权限、删除、Pending 审核、资产/消费/转账/报销等表单都复用同一交互层；
+- 退出登录表单不走异步增强；
+- 浏览器禁用 JavaScript 时仍使用原有标准 POST + 303/http.Error 行为，服务端仍是最终权威。
+
+新 CSS 统一提供内联成功/错误反馈、提交中状态、Toast、快捷按钮以及移动端布局。
+
+### 22.5 公共资产余额变动视图与人类可读类型
+
+“公共资产来源/调整流水”调整为更完整的成员代管余额变动视图。原 `asset_events` 仍是资产来源/调整事实，同时从既有消费和报销事实派生只读的 `消费报销` 行：
+
+- 消费发生时的自动报销：按经手人显示 `消费报销 −¥public_paid_amount_cent`；
+- 后续登记报销：按报销付款持有人显示 `消费报销 −¥amount_cent`。
+
+这些行只用于展示，不向 `asset_events` 再插一条记录，否则 `HolderBalanceV2()` 会重复扣减。前端按完整 `occurred_at` 对真实资产事件和两类消费报销行统一倒序排序。
+
+资产事件类型同时统一为人类可读文案：
+
+```text
+INITIAL_ASSET          → 初始资产
+ASSET_IN               → 资产新增
+ASSET_OUT              → 资产减少
+ADJUSTMENT              → 财务调整
+EXPENSE_REIMBURSEMENT   → 消费报销（只读展示语义）
+```
+
+`ASSET_OUT` 和消费报销按余额减少显示负号；`ADJUSTMENT` 保留其真实正负方向。“登记我的资产变动”仍只允许资产新增/资产减少，没有增加消费报销选项。
+
+### 22.6 验证与兼容边界
+
+本轮执行/检查：
+
+- 新增报销展示单元测试，覆盖 ¥9000 消费 / ¥1000 自动报销 / 后续报销后的合计计算；
+- 新增资产事件中文类型与余额正负方向测试；
+- `WithEnhancedFormResponses` 独立测试覆盖增强请求的成功跳转、400 错误原页返回，以及普通非增强 POST 保持原 303；
+- `web/static/app.js` 通过 Node.js `--check`；
+- `dashboard.html`、`assets.html`、`expense-edit.html` 使用 Go `html/template` 实际解析通过；
+- 新增 Go 文件执行 `gofmt`，新 HTTP/Store 逻辑在隔离测试中通过。
+
+本轮没有数据库 schema 变化、没有新增 migration，也不需要删除或重建现有 `data`。`消费报销` 是基于现有 `public_paid_amount_cent` 和 `reimbursements` 的只读派生视图，账务权威事实及现有一致性公式不变。
+
+当前执行环境仍无法从 `github.com` 拉取完整仓库依赖，因此没有声称运行完整 `go test ./...`；本轮完成的是新增逻辑的隔离 Go 测试、模板解析和前端语法检查。用户本地完整依赖环境可继续通过现有启动脚本和 `go test ./...` 做整库验证。
