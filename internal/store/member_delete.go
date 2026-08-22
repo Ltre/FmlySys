@@ -41,7 +41,7 @@ ORDER BY id`)
 // DeleteMemberSmart physically deletes an unused member. If persistent business
 // or audit data references the member, the member row is retained with is_del=1
 // and status=deleted so historical records and foreign-key relationships remain
-// intact. Authentication/session state is removed in both cases.
+// intact. Authentication/session state, including Passkeys, is removed in both cases.
 func (s *Store) DeleteMemberSmart(ctx context.Context, auditActor, memberID int64) (string, error) {
 	if memberID <= 0 {
 		return "", errors.New("成员不存在")
@@ -97,6 +97,9 @@ WHERE openid IN (SELECT openid FROM wechat_identities WHERE member_id=?)`, now()
 		return "", err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM member_permissions WHERE member_id=?`, memberID); err != nil {
+		return "", err
+	}
+	if err := deletePasskeyAuthStateTx(ctx, tx, memberID); err != nil {
 		return "", err
 	}
 
