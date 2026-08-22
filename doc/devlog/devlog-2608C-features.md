@@ -209,3 +209,174 @@ navigator.credentials.get()
 当前执行环境无法从 `github.com` / Go Module 源完整拉取依赖，因此没有声称已经运行全仓 `go test ./...`；真实国行 iPhone、Galaxy、微信扫码以及反向代理 HTTPS 的端到端验证仍应在实际部署环境完成。
 
 本 migration 为增量升级，不要求删除或重建现有 `data`。
+
+## 24. Passkey 独立登录身份、手机号定位与跨设备找回
+
+日期：2026-08-22  
+
+> 本节修正并取代第 23 节中“必须先有成员 Session 才能绑定 Passkey”“Passkey 直接绑定 member_id”的身份模型。第 23 节保留为历史开发记录，不回写删除。
+
+### 24.1 需求重新确认
+
+本轮把 Passkey 的业务语义固定为：
+
+```text
+Passkey 本身可以在未登录状态下创建一个全新的 FmlySys 登录身份；
+Passkey 是该身份认证的充分必要依据；
+手机号只是用户熟悉的“身份定位标记”，不能单独认证、重置或接管身份。
+```
+
+因此不再采用：
+
+```text
+微信登录 → 已有 member_id → 再给 member_id 绑定 Passkey
+```
+
+而采用：
+
+```text
+Passkey 登录身份 → 可独立存在 → 管理员再关联到 member_id
+```
+
+微信扫码仍是与 Passkey 并列的另一条正式登录路径，两者互不构成前置条件。
+
+### 24.2 为什么保留手机号，但不把手机号当 Passkey 主键
+
+用户在设备 A 首次创建身份时填写手机号与识别备注，例如：
+
+```text
+手机号：13800138000
+备注：张三 / 138****1234 / iPhone 16
+```
+
+系统会把中国大陆 11 位手机号统一规范为 `+86...`，同时接受 `+86`、空格、短横线和括号等常见输入形式。手机号在一个数据分区内唯一，用于回答“我要找回哪个 FmlySys 登录身份”。
+
+但底层 WebAuthn `userHandle` 仍然使用随机生成的 32-byte 不透明值，不把手机号、姓名或备注直接写入认证主键。这样手机号泄露、换号或被别人知道，都不会直接取得登录权限。
+
+### 24.3 设备 A 首次创建全新 Passkey 登录身份
+
+登录页新增独立的“首次创建 Passkey 身份”流程：
+
+```text
+未登录
+→ 输入手机号 + 身份备注
+→ 服务端确认手机号尚未创建过 Passkey 身份
+→ 生成随机 userHandle
+→ navigator.credentials.create()
+→ WebAuthn 注册验证完成
+→ 原子创建 passkey_login_identity + 首把 credential
+→ 创建 fmly_passkey_identity Session
+→ 进入 /passkey/account
+```
+
+注册完成前不会提前持久化一个空身份，避免用户取消系统 Passkey 面板后留下没有凭据的孤儿账号。
+
+### 24.4 设备 B 找回设备 A 创建的同一身份
+
+设备 B 的用户只需要记住自己最熟悉的手机号：
+
+```text
+设备 B
+→ 输入设备 A 创建身份时的手机号
+→ FmlySys 定位到原 Passkey 登录身份
+→ 服务端只下发该身份已有 credential 的 WebAuthn assertion
+→ navigator.credentials.get()
+```
+
+此时分两种情况：
+
+1. Passkey 已经由 iCloud、Google Password Manager、Samsung Pass 或其它凭据提供器同步到 B：直接用 B 上已有凭据验证；
+2. B 没有本地凭据，但 A 仍持有：浏览器/系统可选择“使用其他设备”，显示标准 FIDO 跨设备二维码，由设备 A 扫码并用 A 上的 Passkey 完成验证。
+
+只有 assertion 验证成功后，FmlySys 才创建 `fmly_passkey_identity` 登录 Session。**仅输入正确手机号不会产生任何登录态。**
+
+### 24.5 让设备 B 以后可以独立登录
+
+设备 B 通过设备 A 的已有 Passkey 完成找回后，会进入 `/passkey/account?recovered=1`。页面明确提示可立即“给当前设备新增 Passkey”。
+
+新增流程仍然绑定到同一个 Passkey 登录身份：
+
+```text
+Identity P123
+├── Credential A：设备 A
+└── Credential B：设备 B
+```
+
+以后 B 输入同一手机号即可直接使用 Credential B 登录，不必每次借设备 A。
+
+为降低 Session 被盗后被恶意增加新认证凭据的风险，只有“刚刚通过 Passkey 验证”的身份 Session 才能新增 Passkey；当前实现 freshness 为 10 分钟。超过后要求重新使用已有 Passkey 登录，再执行新增设备操作。
+
+### 24.6 新数据模型
+
+新增增量 migration：
+
+```text
+migrations/partition/000006_passkey_login_identities.sql
+```
+
+新增：
+
+```text
+passkey_login_identities
+passkey_login_users
+passkey_login_credentials
+passkey_login_ceremonies
+passkey_login_sessions
+```
+
+职责：
+
+- `passkey_login_identities`：FmlySys 独立登录主体，保存唯一手机号定位标记、身份备注及可选 `member_id`；
+- `passkey_login_users`：按 RP 保存随机 WebAuthn user handle；
+- `passkey_login_credentials`：同一身份的一把或多把 Passkey 公钥凭据；
+- `passkey_login_ceremonies`：5 分钟一次性 create/login/add ceremony；
+- `passkey_login_sessions`：Passkey 验证后建立的登录 Session，并记录最近一次强认证时间。
+
+旧 `000005_passkeys.sql` 保留用于历史 migration 兼容，但新的公开登录流程由 `WithPasskeyIdentities` 外层路由接管；旧的“成员登录后绑定 Passkey”POST 接口被显式返回 `410 Gone`，避免继续生成已经不参与新登录模型的旧式凭据。
+
+### 24.7 管理员识别与家族成员关联
+
+新建 Passkey 身份可以先独立存在，不自动获得家族数据权限。`/admin/passkeys` 改为展示：
+
+- 身份 ID；
+- 用户填写的手机号；
+- 身份备注；
+- 该身份下所有 Passkey 的设备备注、RP、创建时间、最近使用时间；
+- 当前关联的家族成员。
+
+管理员可根据“姓名 / 手机号 / 设备”等备注辨认用户，再把该 Passkey 登录身份关联到一个已有 `member_id`。关联完成后，该用户下一次以 Passkey 登录（或刷新仍有效的 Passkey 身份页）即可建立正常 `fmly_session`，进入现有权限体系。
+
+手机号不参与管理员关联后的授权判断；真正认证仍由 Passkey assertion 完成。
+
+### 24.8 登出与安全边界
+
+正常 `/logout` 现在由外层 Passkey 身份路由接管，同时删除：
+
+```text
+fmly_session
+fmly_passkey_identity
+```
+
+避免用户表面退出家族系统后，仍可凭残留的 Passkey 身份 Session 立即恢复成员 Session。
+
+明确不实现：
+
+```text
+输入手机号
+→ 短信验证码
+→ 重置/新增 Passkey
+```
+
+因为一旦允许手机号本身恢复认证凭据，Passkey 就不再是该登录身份的必要依据。当前如果所有 Passkey 都丢失，只能另行设计管理员人工恢复流程；本轮不把手机号升级为认证因子。
+
+### 24.9 验证
+
+本轮在可用执行环境中完成：
+
+- 新增 Go 文件全部经过 `gofmt`；
+- 新增 Go 文件使用标准库 `go/parser` 做语法解析检查；
+- `web/static/passkeys.js` 通过 `node --check`；
+- 新增 Store 测试覆盖手机号规范化、身份创建、手机号定位同一身份、重复手机号拒绝、身份 Session、管理员绑定成员、ceremony 一次性消费；
+- 旧 RP / HTTPS 测试继续保留。
+
+当前执行环境无法解析 `github.com`，Go Module 缓存也没有 `go-webauthn` / SQLite 依赖，因此无法真实执行全仓 `go test ./...`。提交前不把未执行的测试描述为已通过；实际部署后仍需在 HTTPS 域名上做设备 A → 设备 B 的 WebAuthn/FIDO 跨设备端到端验证。
