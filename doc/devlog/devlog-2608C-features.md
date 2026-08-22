@@ -941,3 +941,100 @@ members.status = 'deleted'
 - Windows 开发脚本已明确输出 localhost、LAN/domain 访问方式及防火墙边界。
 
 当前执行环境没有仓库依赖缓存，无法在这里跑依赖 `modernc.org/sqlite` 的完整仓库 `go test ./...`；对应正式测试文件已经提交，用户本地启动脚本会先执行 `go mod tidy/download/verify`，随后可在完整依赖环境中执行测试。该限制不影响已完成的 migration 实际 SQLite 验证、Go 新文件语法/编译隔离检查和前端语法检查。
+
+## 22. 首页公共资产捷径、消费报销语义与统一表单交互
+
+### 22.1 首页公共资产快捷入口
+
+首页业务卡片区在“近期事务”旁新增“公共资产”卡片。卡片继续遵守现有成员权限，只在拥有 `assets.view` 时出现，并展示公共财产净额和当前待报销金额。快捷入口按权限分别提供：
+
+- `记录一笔消费` → `/assets#new-expense`，仅 `expenses.create` 可见；
+- `报销` → `/assets#reimbursement`，仅 `reimbursements.create` 可见；
+- `查看消费记录` → `/assets#expense-records`。
+
+公共资产页为这些目标区块增加稳定锚点和滚动间距，因此桌面和手机都可以直接落到对应业务区域。
+
+### 22.2 自动报销、后续报销与待报销语义
+
+本轮没有改变消费的资金计算，也没有新增重复账务事实。此前 `CreateExpenseAuto()` 已经在消费发生时按经手人当前代管余额自动拆分：
+
+```text
+public_paid_amount_cent = min(消费金额, 经手人消费前代管余额)
+reimbursable_amount_cent = 消费金额 - public_paid_amount_cent
+```
+
+问题只出在展示层：原页面只显示 `reimbursements` 中后续登记的金额和剩余待报销，没有把 `public_paid_amount_cent` 解释为消费发生瞬间完成的“自动报销”。本轮统一定义：
+
+```text
+自动报销 = 消费金额 - reimbursable_amount_cent
+后续报销 = reimbursements 有效记录合计
+已报销合计 = 自动报销 + 后续报销
+待报销 = reimbursable_amount_cent - 后续报销
+```
+
+例如经手人原代管 ¥1000、公共消费 ¥9000，页面现在明确显示：自动报销 ¥1000、已报销合计 ¥1000、待报销 ¥8000。后续如果再报销 ¥3000，则显示后续报销 ¥3000、已报销合计 ¥4000、待报销 ¥5000。
+
+`Expense` 增加只读计算方法用于模板展示，不新增数据库字段，也不改变 HolderBalance/Net/Pending 的权威计算。
+
+### 22.3 消费流水一键进入报销
+
+公共资产页的消费流水中，只要 `PendingCent > 0` 且当前成员拥有 `reimbursements.create`，报销列会显示“报销”按钮。点击后：
+
+1. 自动把 `#reimbursement-expense` 选择为该消费 ID；
+2. 平滑滚动到“登记报销”；
+3. 给报销卡片短暂高亮，明确当前操作目标；
+4. 将焦点放到待报销消费下拉框，键盘/屏幕阅读器也能直接继续操作。
+
+这只是前端便捷定位；实际金额上限、付款持有人余额等仍由现有 Store 校验，不绕过服务端业务规则。
+
+### 22.4 前后台统一增强表单交互
+
+此前前台资产表单以及后台多项管理表单一旦发生校验错误，会直接由 `http.Error` 返回纯文本页面；成功后则 303 跳转，用户缺少明确的提交中、成功和错误反馈。本轮新增渐进增强协议：
+
+- `app.js` 对正常业务 POST 表单使用 `FormData + fetch`；
+- 请求携带 `X-Fmly-Async: 1`，服务端 `WithEnhancedFormResponses` 只对这种请求把既有 Handler 的 303/错误响应转换成 JSON；
+- 后端 Handler、权限校验、金额校验和实际写库逻辑完全复用，不重新实现一套 API；
+- 校验失败时停留在原页面，在当前表单顶部展示后端原始错误，已填写字段和已选择文件不丢失；
+- 提交期间按钮进入“提交中…”状态并防止重复提交；
+- 成功时保存短期页面提示，再根据服务端原 303 目标刷新数据；回到页面后显示可关闭成功 Toast；
+- 前台资产变动、消费、内部转账、报销、消费编辑，以及后台成员、权限、删除、Pending 审核、资产/消费/转账/报销等表单都复用同一交互层；
+- 退出登录表单不走异步增强；
+- 浏览器禁用 JavaScript 时仍使用原有标准 POST + 303/http.Error 行为，服务端仍是最终权威。
+
+新 CSS 统一提供内联成功/错误反馈、提交中状态、Toast、快捷按钮以及移动端布局。
+
+### 22.5 公共资产余额变动视图与人类可读类型
+
+“公共资产来源/调整流水”调整为更完整的成员代管余额变动视图。原 `asset_events` 仍是资产来源/调整事实，同时从既有消费和报销事实派生只读的 `消费报销` 行：
+
+- 消费发生时的自动报销：按经手人显示 `消费报销 −¥public_paid_amount_cent`；
+- 后续登记报销：按报销付款持有人显示 `消费报销 −¥amount_cent`。
+
+这些行只用于展示，不向 `asset_events` 再插一条记录，否则 `HolderBalanceV2()` 会重复扣减。前端按完整 `occurred_at` 对真实资产事件和两类消费报销行统一倒序排序。
+
+资产事件类型同时统一为人类可读文案：
+
+```text
+INITIAL_ASSET          → 初始资产
+ASSET_IN               → 资产新增
+ASSET_OUT              → 资产减少
+ADJUSTMENT              → 财务调整
+EXPENSE_REIMBURSEMENT   → 消费报销（只读展示语义）
+```
+
+`ASSET_OUT` 和消费报销按余额减少显示负号；`ADJUSTMENT` 保留其真实正负方向。“登记我的资产变动”仍只允许资产新增/资产减少，没有增加消费报销选项。
+
+### 22.6 验证与兼容边界
+
+本轮执行/检查：
+
+- 新增报销展示单元测试，覆盖 ¥9000 消费 / ¥1000 自动报销 / 后续报销后的合计计算；
+- 新增资产事件中文类型与余额正负方向测试；
+- `WithEnhancedFormResponses` 独立测试覆盖增强请求的成功跳转、400 错误原页返回，以及普通非增强 POST 保持原 303；
+- `web/static/app.js` 通过 Node.js `--check`；
+- `dashboard.html`、`assets.html`、`expense-edit.html` 使用 Go `html/template` 实际解析通过；
+- 新增 Go 文件执行 `gofmt`，新 HTTP/Store 逻辑在隔离测试中通过。
+
+本轮没有数据库 schema 变化、没有新增 migration，也不需要删除或重建现有 `data`。`消费报销` 是基于现有 `public_paid_amount_cent` 和 `reimbursements` 的只读派生视图，账务权威事实及现有一致性公式不变。
+
+当前执行环境仍无法从 `github.com` 拉取完整仓库依赖，因此没有声称运行完整 `go test ./...`；本轮完成的是新增逻辑的隔离 Go 测试、模板解析和前端语法检查。用户本地完整依赖环境可继续通过现有启动脚本和 `go test ./...` 做整库验证。

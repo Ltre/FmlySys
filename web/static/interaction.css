@@ -1,0 +1,139 @@
+.quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.quick-actions .secondary-button {
+  width: auto;
+  min-height: 38px;
+  padding: 7px 10px;
+}
+.reimbursement-breakdown,
+.reimbursement-summary {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.reimbursement-summary {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px 14px;
+  padding: 12px;
+  margin: 10px 0 14px;
+  border: 1px solid #e3e5e8;
+  border-radius: 10px;
+  background: #fafbfc;
+}
+.reimbursement-jump {
+  width: auto;
+  min-height: 34px;
+  margin-top: 7px;
+  padding: 6px 10px;
+}
+.balance-change.negative {
+  color: #b3261e;
+  font-weight: 600;
+}
+.balance-change.positive {
+  color: #137333;
+  font-weight: 600;
+}
+.form-feedback {
+  grid-column: 1 / -1;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid #d7dce2;
+  background: #fafbfc;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.form-feedback[hidden] {
+  display: none;
+}
+.form-feedback.is-success {
+  color: #137333;
+  border-color: #b9d8c1;
+  background: #f2faf4;
+}
+.form-feedback.is-error {
+  color: #b3261e;
+  border-color: #e3b8b4;
+  background: #fff5f4;
+}
+button[aria-busy="true"] {
+  cursor: wait;
+  opacity: .72;
+}
+.interaction-highlight {
+  animation: interaction-highlight 1.15s ease-out;
+}
+@keyframes interaction-highlight {
+  0% { box-shadow: 0 0 0 4px rgba(26, 115, 232, .22); }
+  100% { box-shadow: 0 0 0 0 rgba(26, 115, 232, 0); }
+}
+.app-toast {
+  position: fixed;
+  top: 74px;
+  right: 18px;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: min(430px, calc(100vw - 28px));
+  padding: 12px 12px 12px 14px;
+  border: 1px solid #b9d8c1;
+  border-radius: 10px;
+  background: #f2faf4;
+  color: #164b25;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .16);
+  line-height: 1.5;
+}
+.app-toast.is-error {
+  border-color: #e3b8b4;
+  background: #fff5f4;
+  color: #8c1d18;
+}
+.app-toast > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.toast-close {
+  flex: 0 0 auto;
+  min-height: 30px;
+  min-width: 30px;
+  padding: 0 7px;
+  border: 0;
+  background: transparent;
+  color: currentColor;
+  font-size: 22px;
+  line-height: 1;
+}
+#new-expense,
+#reimbursement,
+#expense-records,
+#asset-movements,
+#transfer-records {
+  scroll-margin-top: 96px;
+}
+
+@media (max-width: 760px) {
+  .quick-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .quick-actions .secondary-button,
+  .reimbursement-jump {
+    width: 100%;
+  }
+  .reimbursement-summary {
+    grid-template-columns: 1fr;
+  }
+  .app-toast {
+    top: 10px;
+    right: 10px;
+    left: 10px;
+    width: auto;
+  }
+}

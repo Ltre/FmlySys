@@ -51,8 +51,74 @@ type Expense struct {
 	Description, PaymentChannel, Merchant, MatterTitle string
 	Evidence                                           []Evidence
 }
+
+func (e Expense) AutoReimbursedCent() int64 {
+	v := e.AmountCent - e.ReimbursableCent
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
+func (e Expense) ManualReimbursedCent() int64 {
+	if e.ReimbursedCent < 0 {
+		return 0
+	}
+	return e.ReimbursedCent
+}
+
+func (e Expense) TotalReimbursedCent() int64 {
+	return e.AutoReimbursedCent() + e.ManualReimbursedCent()
+}
+
+func (e AssetEvent) TypeLabel() string {
+	switch e.Type {
+	case "INITIAL_ASSET":
+		return "初始资产"
+	case "ASSET_IN":
+		return "资产新增"
+	case "ASSET_OUT":
+		return "资产减少"
+	case "ADJUSTMENT":
+		return "财务调整"
+	case "EXPENSE_REIMBURSEMENT":
+		return "消费报销"
+	default:
+		return e.Type
+	}
+}
+
+func (e AssetEvent) BalanceDeltaCent() int64 {
+	if e.Type == "ASSET_OUT" {
+		if e.AmountCent < 0 {
+			return e.AmountCent
+		}
+		return -e.AmountCent
+	}
+	return e.AmountCent
+}
+
+func (e AssetEvent) BalanceAmountCent() int64 {
+	v := e.BalanceDeltaCent()
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func (e AssetEvent) BalanceSign() string {
+	v := e.BalanceDeltaCent()
+	if v < 0 {
+		return "−"
+	}
+	if v > 0 {
+		return "+"
+	}
+	return ""
+}
+
 type AuditLog struct {
-	ID                                                        int64
+	ID                                                          int64
 	ActorName, Action, BeforeJSON, AfterJSON, Reason, CreatedAt string
 }
 type Evidence struct {
