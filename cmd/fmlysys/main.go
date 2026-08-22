@@ -56,6 +56,7 @@ func main() {
 	handler = app.WithAdminMemberDelete(handler)
 	handler = app.WithPasskeys(handler)
 	handler = app.WithPasskeyIdentities(handler)
+	handler = app.WithAssetWorkflowFixes(handler)
 	handler = httpserver.WithRequestDeadline(handler, 15*time.Second)
 	handler = httpserver.WithEnhancedFormResponses(handler)
 	srv := &http.Server{Addr: cfg.Addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}

@@ -380,3 +380,104 @@ fmly_passkey_identity
 - 旧 RP / HTTPS 测试继续保留。
 
 当前执行环境无法解析 `github.com`，Go Module 缓存也没有 `go-webauthn` / SQLite 依赖，因此无法真实执行全仓 `go test ./...`。提交前不把未执行的测试描述为已通过；实际部署后仍需在 HTTPS 域名上做设备 A → 设备 B 的 WebAuthn/FIDO 跨设备端到端验证。
+
+## 25. 资产表单、消费提交、凭证预览与报销流水修正
+
+日期：2026-08-23  
+
+### 25.1 资产金额误报为空
+
+根因在前端统一异步表单增强：原实现无论表单有没有附件，都使用 `FormData` 发送，因此普通资产登记也变成 `multipart/form-data`。而资产变动处理器只调用 `ParseForm()`，没有解析 multipart 字段，最终 `amount` 为空并触发“金额不能为空”。前台“登记我的资产变动”和后台“登记公共资产”因此同时复现。
+
+本轮对资产工作流的请求编码做分流：
+
+```text
+没有实际选择附件
+→ application/x-www-form-urlencoded
+
+选择了附件
+→ multipart/form-data
+```
+
+同时服务端新增统一的 `parseWorkflowRequest`，兼容 urlencoded 与 multipart，因此旧页面缓存或其它客户端即使仍用 multipart 提交无附件表单，也能正确读到金额等字段。
+
+### 25.2 新增公共消费长时间 Pending 与半完成状态
+
+旧消费保存流程为：
+
+```text
+CreateExpenseAuto()
+→ 提交消费记录事务
+→ SaveEvidenceFiles()
+→ 另开事务保存凭证
+```
+
+这意味着消费主记录可能已经提交，而凭证文件/附件元数据仍未处理完；用户刷新后能看到消费记录，却无法确定整个接口是否完整成功。并且统一使用 multipart 后，即使没有附件，`WithRequestDeadline` 也会把该请求当成大文件上传而跳过 15 秒数据库请求超时保护。
+
+本轮改为：
+
+```text
+无附件
+→ urlencoded 请求，恢复正常 request deadline
+
+有附件
+→ 先完成文件校验与磁盘暂存（不占用 SQLite 写事务）
+→ 单一 SQLite 事务写入消费主记录 + 消费审计 + 凭证元数据 + 凭证审计
+→ 事务成功后才视为消费保存完成
+```
+
+因此消费记录不会再在数据库单元尚未完整提交时提前表现为“已经保存”。文件 I/O 放在写事务之前，避免上传/哈希过程中长期占用 SQLite writer。单文件仍保持 10MB、一次最多 20 个凭证的既有约束。
+
+### 25.3 凭证文件改为可预览优先
+
+`GET /evidence/{id}` 不再对所有凭证强制 `Content-Disposition: attachment`。
+
+以下类型改为浏览器内联预览：
+
+- 图片：JPG/JPEG/PNG/GIF/WebP/BMP/HEIC/HEIF；
+- 视频：MP4/WebM/MOV/M4V；
+- 音频：MP3/M4A/AAC/WAV/OGG/FLAC；
+- PDF；
+- TXT（显式使用 `text/plain; charset=utf-8`）。
+
+Word/Excel/PPT 等不适合浏览器直接预览的类型仍保持下载。消费、内部转账、报销流水中的凭证链接默认新标签页打开；用户仍可使用浏览器右键“另存为/下载链接”下载可预览文件。凭证上传允许列表同步增加常见视频、音频扩展名。
+
+### 25.4 后台消费流水增加快捷报销
+
+后台“登记报销”区域补充稳定定位点，并对消费流水中 `PendingCent > 0` 的记录在“报销”单元格增加“报销”按钮。
+
+点击后：
+
+```text
+自动把该 expense_id 写入“选择待报销消费”
+→ 页面滚动到登记报销区域
+→ 高亮该区域
+→ 焦点落到待报销消费 select
+```
+
+复用前台已经存在的 `enhanceReimbursementJumps()` 交互，前后台行为保持一致。
+
+### 25.5 资产变动流水增加“消费报销”并统一人类可读类型
+
+“消费报销”是消费/报销业务事实对持有人代管余额造成的减少，不开放为“登记公共资产”的手工事件类型。本轮后台流水改用完整的余额变动视图：
+
+- `INITIAL_ASSET` → `初始资产`；
+- `ASSET_IN` → `资产新增`；
+- `ASSET_OUT` → `资产减少`，金额按负数展示；
+- `ADJUSTMENT` → `财务调整`；
+- 消费发生时自动使用代管资金 → `消费报销`，负数；
+- 后续登记报销 → `消费报销`，负数。
+
+消费报销流水从 `public_expenses.public_paid_amount_cent` 与 `reimbursements` 派生，不向 `asset_events` 重复写入数据，因此不会重复扣减余额。前台原本已经以相同语义合成消费报销行，本轮将后台也统一到这一口径。
+
+### 25.6 验证与边界
+
+本轮完成：
+
+- 新增 Go 文件 `gofmt`；
+- 使用标准库 `go/parser` 对新增 Go 文件及启动入口做语法解析；
+- `web/static/asset-workflow.js` 通过 `node --check`；
+- 修改后的共享导航模板通过 `html/template` 解析；
+- 新增测试覆盖 urlencoded/multipart 金额解析、媒体凭证允许列表、内联预览类型判断、资产流水人类可读类型及消费报销负数语义。
+
+当前执行环境无法解析 `github.com` 并补齐 Go Module 依赖，因此没有声称已运行全仓 `go test ./...`。本轮不需要新增数据库 migration。
