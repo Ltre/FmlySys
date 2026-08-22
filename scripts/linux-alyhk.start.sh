@@ -9,7 +9,7 @@ EXIT_CODE=1
 
 # Listener settings: FMLYSYS_PORT is the single source of truth for the server port.
 export FMLYSYS_BIND_HOST="0.0.0.0"
-export FMLYSYS_PORT="8080"
+export FMLYSYS_PORT="4000"
 # Server deployments must not expose the local development login shortcut.
 export FMLYSYS_DEV_AUTH_ENABLED="0"
 
