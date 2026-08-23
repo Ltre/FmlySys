@@ -2307,7 +2307,205 @@
 	验证方面已经完成 `gofmt`、Go `go/parser` 语法解析、`node --check`、模板解析，并新增相关回归测试。当前环境无法补齐 GitHub 上的 Go Module 依赖，所以没有虚报 `go test ./...` 已完整跑通。本轮不涉及数据库 migration。
 
 
+问：
+
+	1、打开后台http://localhost:8080/admin 页面，看到提示"SQL logic error: no such column: r.payer_holder_meb_id (1)"。在之前的[0563678064466a0e859b3d5a61ee7cf8597fb3a2]版本还没有出现这个问题
+	
+	2、测试了前台创建passkey支持的身份后，自动跳转到【http://localhost:8080/passkey/account?created=1 】页，感觉很莫名其妙，不是应该跳转到首页总览吗？这个【http://localhost:8080/passkey/account?created=1 】页面就应该由前台header菜单的用户个人信息里进入。况且，我现在发现我即使已经有passkey了，但是无法进入首页总览。
+	
+	请在分支 dev-2608C-step1 修改，把改动提交并推送该分支到github，不要PR。
+	推理过程及开发日志保存到 doc/devlog/devlog-2608C-features.md。
+	约定每次提问不论需求多少个，代码提交记录仅限产生一次，提交的title和description以中文为主。
+	
+	
+答：
+
+	我先按当前 dev-2608C-step1 HEAD 重新核对，不沿用上一轮假设。两个问题我会分别追：后台 SQL 列名是否是本轮新增代码里的拼写错误；Passkey 创建完成后为什么只建立了“Passkey 身份 Session”却没有落到正常前台成员 Session / 首页权限链。最终仍然只做 1 个提交，直接 push，不建 PR。
+
+	第 1 个问题已经确认是上一轮新增 SQL 的纯拼写错误：写成了 r.payer_holder_meb_id，真实字段是 r.payer_holder_member_id，所以只要后台加载“消费报销”流水就直接报错。
+
+	第 2 个问题更关键：现在代码虽然创建了 fmly_passkey_identity，但首页 / 的认证中间件只认 fmly_session（也就是已关联 member 的会话）。因此“Passkey 身份已经登录”与“前台认为已登录”是两套状态，确实违背了你前面确定的“Passkey 本身就是登录态依据”。我会把这两层打通，同时保留“尚未关联家族成员时不能凭空获得业务权限”这个边界。
+
+	Passkey 这部分我会按“认证”和“授权”分开修：Passkey 验证成功本身就算已登录，所以无论刚创建还是找回，都回首页；如果这个 Passkey 身份已经关联家族成员，则首页直接恢复正常成员 Session 和权限；如果尚未关联，则仍进入首页，但只显示“已登录、待管理员关联成员”的总览壳，不会凭空获得资产/事务权限。个人 Passkey 管理入口移到前台右上角用户名。
+
+	修复方案已经完成静态校验：新增 Go 文件和启动入口已 gofmt，新首页模板与修改后的全局导航模板已用 html/template 实际解析通过。原有 asset_workflow_fixes_test.go 本身就用真实字段 payer_holder_member_id 构造测试表，所以这次把生产查询拼写修正后，该测试也会重新具备覆盖价值。现在我开始按最新 HEAD 组装唯一一次提交。
+
+	提交已经 fast-forward 推到目标分支，没有 PR。现在只做最后远端验收：确认 HEAD、确认本轮相对原 HEAD 恰好增加 1 个 commit，并检查变更文件列表没有夹带其它改动。
+
+	已完成，并已直接推送到 `dev-2608C-step1`，**没有创建 PR，本轮只新增 1 个提交**。
+
+	当前远端 HEAD：
+
+	`66292a976cfb65f7ac2e9d08929a30cfd09c0d64`
+
+	提交标题：
+
+	`fix: 修复后台报销查询并打通 Passkey 前台登录态`
+
+	这次主要修复两部分：
+
+	1. **后台 `/admin` SQL 报错**
+
+	   * 根因就是上一版本新代码把真实字段 `payer_holder_member_id` 错写成了 `payer_holder_meb_id`。
+	   * 已修正，后台“消费报销”合成流水不再因为这个字段报 `no such column`。
+
+	2. **Passkey 登录态与首页打通**
+
+	   * 创建全新 Passkey 身份成功后，不再跳到 `/passkey/account?created=1`，而是直接进入 `/`。
+	   * 使用已有 Passkey 登录/找回身份成功后，也直接进入 `/`。
+	   * `fmly_passkey_identity` 现在正式被视为**前台已登录状态**，不再必须先有 `fmly_session` 才算登录。
+	   * 如果这个 Passkey 身份已经关联家族成员：自动恢复对应成员 Session 和权限，然后直接显示正常首页总览。
+	   * 如果尚未关联成员：仍然可以进入首页，明确显示“Passkey 登录身份已建立、等待管理员关联成员”，但不会获得公共资产、事务、共享资料等业务权限。
+	   * `/passkey/account` 回归到**个人信息 / Passkey 管理页**，不再作为登录后的默认落地页。
+	   * Header 中原来的独立“通行密钥”菜单已收敛掉，右上角用户名改为个人信息入口 `/account`；对于 Passkey 用户会进入 `/passkey/account`。
+
+	开发日志已追加：
+
+	`doc/devlog/devlog-2608C-features.md`
+
+	新增第 **26 节「后台报销流水 SQL 修复与 Passkey 登录入口收敛」**。
+
+	远端已经确认新 HEAD 的直接父提交就是本轮开始时的 `05d4296d...`，因此本次确实只有这 **1 个新 commit**。
+
+	静态检查、模板解析和新增回归测试已处理；当前执行环境仍无法正常解析 `github.com` 以补齐 Go Module，所以没有声称完整执行了 `go test ./...`。你现在重点可以重新测试 `/admin`，以及“创建 Passkey → 首页”、“已有 Passkey 登录 → 首页”、“右上角用户名 → Passkey 个人页”这三条流程。
+
 	
 
+问：
+
+	测试了，打开首页就跳到/login，且打不开，页面提示： This page isn’t working localhost redirected you too many times. Try deleting your cookies. ERR_TOO_MANY_REDIRECTS
+
+答：
+
+	这个是我上一轮把 Passkey 登录态“兜到首页”时引入的路由闭环，我直接按当前 HEAD 追 / → /login → ... 的跳转链，不让你再删 Cookie 试运气。先确认是哪一层把已有 Passkey identity Session 和 /login 相互重定向了，然后修掉并推回同一分支。
+
+	根因已经找到了，而且很明确：不是 Cookie 本身。上一轮新增外层 http.ServeMux 时用了 GET /，在 Go 新版 ServeMux 里它不是“只匹配首页”，而会作为整棵 / 路径的 GET 通配入口；于是 GET /login 也被 passkeyAwareDashboard 截获，它又因为没有有效登录态重定向到 /login，形成 /login → /login → /login 无限循环。
+
+	正确修法是把首页路由改成精确根路径：GET /{$}，并补一个回归测试确保 /login、/static/... 等永远继续透传到底层路由。
+
+	正在搜尋網路
+	这个回归点已经用最小测试复现到路由规则层了：只要外层写 GET /，/login、/static/app.css、/assets、/admin 这些 GET 都会被首页处理器抢走；改成 GET /{$} 后它们才会透传。也就是说这次不需要改 Session/Cookie 数据模型，只需要把“首页精确匹配”修正，并加防回归测试。
+
+	修复代码已经就绪；我现在只差把这次根因和回归测试记录追加进既有 devlog，然后就会用当前 HEAD 为父提交一次性写入，保证目标分支最终只多 1 个提交。
+
+	修复已经 fast-forward 推到 dev-2608C-step1。我再做最后一次远端验收：确认目标分支相对上一 HEAD 只增加这 1 个提交，并确认 devlog、代码和测试都在同一提交里。
+
+	已修复并推送到 `dev-2608C-step1`，**没有 PR，本轮目标分支只新增 1 个提交**。
+
+	当前 HEAD：
+
+	`df256af9a210ba7a4b942a7e5cc6d55d239d4fbd`
+
+	提交标题：
+
+	`fix: 修复登录页无限重定向`
+
+	这次的根因不是 Cookie，而是上一轮新增的外层路由：
+
+	```go
+	mux.HandleFunc("GET /", s.passkeyAwareDashboard)
+	```
+
+	在当前 Go 1.23 的 `http.ServeMux` 中，`GET /` 会匹配整个 `/` 子树，所以实际上连这些请求也被首页处理器截获了：
+
+	```text
+	/login
+	/static/app.css
+	/assets
+	/admin
+	```
+
+	于是未登录访问首页时发生：
+
+	```text
+	/
+	→ /login
+	→ 又被 passkeyAwareDashboard 截获
+	→ /login
+	→ ...
+	```
+
+	最终就是你看到的 `ERR_TOO_MANY_REDIRECTS`。
+
+	现在已改成精确首页匹配：
+
+	```go
+	mux.HandleFunc("GET /{$}", s.passkeyAwareDashboard)
+	```
+
+	我还单独用 Go 标准库实际验证了路由结果：
+
+	```text
+	/               => 首页处理器
+	/login          => 下层原登录路由
+	/static/app.css => 下层静态文件路由
+	/assets         => 下层资产路由
+	/admin          => 下层后台路由
+	```
+
+	并新增回归测试，专门防止以后再把根路由写成会吞掉整个 GET 子树的形式。
+
+	`doc/devlog/devlog-2608C-features.md` 已追加第 **27 节「修复 Passkey 前门导致的 /login 无限重定向」**。远端也确认当前提交的直接父提交就是上一版 `66292a97...`，所以分支历史上这次只增加这一条提交。
+
+	**不需要删除 Cookie。** 更新并重启当前版本后，直接重新打开 `http://localhost:8080/` 和 `/login` 即可测试。
 
 
+问：
+
+	
+	1、进入到 /passkey/account 页后，看到身份状态区域，显示"Passkey 登录身份已经创建，但尚未关联家族成员. 请等待管理员后台根据手机号和备注辨认是谁，并把此登录身份关联到对应家族成员。关联完成后刷新本页即可进入系统。"。于是登录到后台admin/passkeys页，选择成员关联passkey，但提示"成员ID无效"。
+	"保存关联"按钮点击后调用接口cURL:
+	```
+		curl --url 'http://localhost:8080/admin/passkeys/1/bind' \
+		  -H 'Accept: application/json' \
+		  -H 'Accept-Language: zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6' \
+		  -H 'Connection: keep-alive' \
+		  -H 'Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryAG4SemjIUAGWBZbQ' \
+		  -b 'tunnel_admin_session=eyJpYXQiOjE3ODcxODUxMzU1MTYsImV4cCI6MTc4ODM5NDczNTUxNiwibWFya2VyIjoiMjAyNi0wNy0wOFQxNTo0Nzo1NS43MDdaIiwibm9uY2UiOiJNWE5PbGVfcjF2TEkwNkp3In0.NkvxPU0ogxqGrSsTerB5ifx0bTkXhtccVzQsqXH8Nw8; fmly_passkey_identity=hHRWwllikjJw5YGhyQ0d6H5So0_aLNvV8qBUfRQs4m4; fmly_admin_session=J664atabaDc3u2__Zn6vaki9NIR7LgC0qk9qm6mnZyM' \
+		  -H 'Origin: http://localhost:8080' \
+		  -H 'Referer: http://localhost:8080/admin/passkeys' \
+		  -H 'Sec-Fetch-Dest: empty' \
+		  -H 'Sec-Fetch-Mode: cors' \
+		  -H 'Sec-Fetch-Site: same-origin' \
+		  -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36' \
+		  -H 'X-Fmly-Async: 1' \
+		  -H 'sec-ch-ua: "Not=A?Brand";v="99", "Google Chrome";v="151", "Chromium";v="151"' \
+		  -H 'sec-ch-ua-mobile: ?0' \
+		  -H 'sec-ch-ua-platform: "Windows"' \
+		  --data-raw $'------WebKitFormBoundaryAG4SemjIUAGWBZbQ\r\nContent-Disposition: form-data; name="member_id"\r\n\r\n1\r\n------WebKitFormBoundaryAG4SemjIUAGWBZbQ--\r\n'
+	```
+	响应：{"ok":false,"message":"成员 ID 无效"}
+
+	
+	2、后台页的"成员与权限"区域，已经填写了姓名，点击添加成员按钮，提示"成员姓名不能为空"
+	接口调用的cURL如下：
+	```
+		curl --url 'http://localhost:8080/admin/members' \
+		  -H 'Accept: application/json' \
+		  -H 'Accept-Language: zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6' \
+		  -H 'Connection: keep-alive' \
+		  -H 'Content-Type: multipart/form-data; boundary=----WebKitFormBoundarywmgVKfANWwEbywSI' \
+		  -b 'tunnel_admin_session=eyJpYXQiOjE3ODcxODUxMzU1MTYsImV4cCI6MTc4ODM5NDczNTUxNiwibWFya2VyIjoiMjAyNi0wNy0wOFQxNTo0Nzo1NS43MDdaIiwibm9uY2UiOiJNWE5PbGVfcjF2TEkwNkp3In0.NkvxPU0ogxqGrSsTerB5ifx0bTkXhtccVzQsqXH8Nw8; fmly_passkey_identity=hHRWwllikjJw5YGhyQ0d6H5So0_aLNvV8qBUfRQs4m4; fmly_admin_session=J664atabaDc3u2__Zn6vaki9NIR7LgC0qk9qm6mnZyM' \
+		  -H 'Origin: http://localhost:8080' \
+		  -H 'Referer: http://localhost:8080/admin' \
+		  -H 'Sec-Fetch-Dest: empty' \
+		  -H 'Sec-Fetch-Mode: cors' \
+		  -H 'Sec-Fetch-Site: same-origin' \
+		  -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36' \
+		  -H 'X-Fmly-Async: 1' \
+		  -H 'sec-ch-ua: "Not=A?Brand";v="99", "Google Chrome";v="151", "Chromium";v="151"' \
+		  -H 'sec-ch-ua-mobile: ?0' \
+		  -H 'sec-ch-ua-platform: "Windows"' \
+		  --data-raw $'------WebKitFormBoundarywmgVKfANWwEbywSI\r\nContent-Disposition: form-data; name="name"\r\n\r\n去你妈的\r\n------WebKitFormBoundarywmgVKfANWwEbywSI\r\nContent-Disposition: form-data; name="relation"\r\n\r\n二逼\r\n------WebKitFormBoundarywmgVKfANWwEbywSI\r\nContent-Disposition: form-data; name="permissions"\r\n\r\nassets.view\r\n------WebKitFormBoundarywmgVKfANWwEbywSI\r\nContent-Disposition: form-data; name="permissions"\r\n\r\nassets.self_change\r\n------WebKitFormBoundarywmgVKfANWwEbywSI\r\nContent-Disposition: form-data; name="permissions"\r\n\r\nexpenses.create\r\n------WebKitFormBoundarywmgVKfANWwEbywSI\r\nContent-Disposition: form-data; name="permissions"\r\n\r\ntransfers.create\r\n------WebKitFormBoundarywmgVKfANWwEbywSI\r\nContent-Disposition: form-data; name="permissions"\r\n\r\nreimbursements.create\r\n------WebKitFormBoundarywmgVKfANWwEbywSI\r\nContent-Disposition: form-data; name="permissions"\r\n\r\nmatters.view\r\n------WebKitFormBoundarywmgVKfANWwEbywSI\r\nContent-Disposition: form-data; name="permissions"\r\n\r\nshare.view\r\n------WebKitFormBoundarywmgVKfANWwEbywSI--\r\n'
+	```
+	响应： {ok: false, message: "成员姓名不能为空"}
+
+
+答：
+
+
+
+
+问：
+	
+	1、在login页输入之前填写的手机号码，并点击"找回已有Passkey身份"后，提示"请使用已有 Passkey 验证。若 Passkey 在设备 A，请选择“使用其他设备”并扫描 FIDO 二维码。"，有时就不会弹出设备验证过程，重启电脑后又可以了。
