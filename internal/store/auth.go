@@ -25,9 +25,9 @@ type PermissionDef struct {
 var PermissionCatalog = []PermissionDef{
 	{Key: "assets.view", Label: "查看公共资产"},
 	{Key: "assets.self_change", Label: "登记本人公共资产增减"},
-	{Key: "expenses.create", Label: "新增公共消费"},
+	{Key: "expenses.create", Label: "➕新增公共消费"},
 	{Key: "expenses.edit", Label: "编辑公共消费"},
-	{Key: "transfers.create", Label: "登记成员间转账"},
+	{Key: "transfers.create", Label: "⇄登记成员间转账"},
 	{Key: "reimbursements.create", Label: "登记报销"},
 	{Key: "matters.view", Label: "查看家族事务"},
 	{Key: "matters.manage", Label: "管理家族事务"},
