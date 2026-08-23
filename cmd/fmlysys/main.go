@@ -60,6 +60,7 @@ func main() {
 	handler = app.WithMoneyWorkflowV3(handler)
 	handler = app.WithMoneyRecordDetails(handler)
 	handler = app.WithQuickMoneyNotes(handler)
+	handler = app.WithAdminEnhancements(handler)
 	handler = app.WithPasskeyUnifiedLogin(handler)
 	handler = app.WithPasskeyFrontDoorFixes(handler)
 	handler = httpserver.WithRequestDeadline(handler, 15*time.Second)

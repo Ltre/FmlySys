@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// WithAdminMemberDelete extends the existing authenticated member-permission
-// endpoint with a delete action without adding a second administrative URL.
-// Normal permission saves pass through unchanged.
+// WithAdminMemberDelete keeps compatibility with the historical delete button
+// embedded in the permissions endpoint. It now always performs a zero-balance
+// soft delete; no administrative route physically deletes a member row.
 func (s *Server) WithAdminMemberDelete(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || !strings.HasPrefix(r.URL.Path, "/admin/members/") || !strings.HasSuffix(r.URL.Path, "/permissions") {
@@ -46,6 +46,6 @@ func (s *Server) WithAdminMemberDelete(next http.Handler) http.Handler {
 			s.fail(w, r, err)
 			return
 		}
-		redirect(w, r, "/admin")
+		redirect(w, r, "/admin#members-and-permissions")
 	})
 }
