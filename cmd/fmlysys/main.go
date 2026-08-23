@@ -58,6 +58,7 @@ func main() {
 	handler = app.WithPasskeyIdentities(handler)
 	handler = app.WithAssetWorkflowFixes(handler)
 	handler = app.WithMoneyWorkflowV3(handler)
+	handler = app.WithMoneyRecordDetails(handler)
 	handler = app.WithQuickMoneyNotes(handler)
 	handler = app.WithPasskeyUnifiedLogin(handler)
 	handler = app.WithPasskeyFrontDoorFixes(handler)

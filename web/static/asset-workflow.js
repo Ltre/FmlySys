@@ -78,6 +78,19 @@
     return messages[path] || '操作已完成。';
   }
 
+  function navigateAfterSuccess(target) {
+    const current = new URL(window.location.href);
+    const sameDocument = target.origin === current.origin &&
+      target.pathname === current.pathname &&
+      target.search === current.search;
+    if (sameDocument) {
+      window.history.replaceState(null, '', target.href);
+      window.location.reload();
+      return;
+    }
+    window.location.assign(target.href);
+  }
+
   document.addEventListener('submit', async (event) => {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
@@ -119,7 +132,7 @@
       if (form.dataset.returnAnchor && target.origin === window.location.origin) {
         target.hash = form.dataset.returnAnchor;
       }
-      window.location.assign(target.href);
+      navigateAfterSuccess(target);
     } catch (error) {
       setBusy(form, submitter, false);
       setFeedback(form, error instanceof Error ? error.message : '提交失败，请检查输入后重试。', true);

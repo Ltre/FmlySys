@@ -72,8 +72,8 @@
       });
       if (!response.ok) return;
       const info = await response.json();
-      let row = null;
-      if (info.href) {
+      let row = document.querySelector(`[data-record-key="${CSS.escape(key)}"]`);
+      if (!row && info.href) {
         const link = Array.from(document.querySelectorAll('a[href]')).find((candidate) => candidate.getAttribute('href') === info.href);
         row = link?.closest('tr') || null;
       }

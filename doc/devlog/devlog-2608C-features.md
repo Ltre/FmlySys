@@ -346,3 +346,100 @@ Go 编译器禁止未使用 import，因此虽然 `go/parser` 语法解析能通
 这次问题说明仅做 parser 语法检查不足以作为 Go 代码提交的编译级验证。后续应优先执行真实 `go test ./...` 或至少 `go build ./cmd/fmlysys`；只有依赖/网络环境确实阻断真实编译时，才退化为 parser 检查并明确标注限制。
 
 当前执行环境仍无法解析 `github.com`，无法在此处重新拉取仓库并运行完整 Go build；但本次失败点已经由用户本地编译器精确定位，修复仅删除确认未使用的 import。
+
+## 31. 修复资金表单刷新/定位、补齐自动报销总览与快速记录入库详情
+
+日期：2026-08-24
+
+### 31.1 提交成功但页面一直停留“提交中”的根因
+
+资金表单的异步提交本身已经成功，服务端也已经写入数据库并返回 `/assets` 或 `/admin`。前端为了定位流水，又给目标 URL 附加了 `#asset-movements`、`#expense-records` 等锚点。
+
+当当前页面本来就是 `/assets` 或 `/admin` 时，`window.location.assign()` 看到的目标只比当前 URL 多一个 hash，浏览器执行的是同文档锚点导航，不会重新请求页面。因此出现：
+
+```text
+数据库已写入
+→ DOM 仍是提交前的旧页面
+→ 按钮保持“提交中…”
+→ 提示保持“正在提交，请稍候…”
+→ 手工刷新后才看到新流水
+```
+
+修复后会先判断目标 URL 是否与当前页面同 origin、pathname、search；如果属于同页目标，则先更新 hash，再强制 `location.reload()`。不同页面仍使用普通 `location.assign()`。
+
+### 31.2 前后台四类资金流水精确定位与短暂高亮
+
+前后台资产变动、消费、内部转账、报销流水行都增加：
+
+```text
+data-record-key="<kind>:<id>"
+```
+
+与服务端已经返回的 `X-Fmly-Record-Key` 完全一致。
+
+`record-focus.js` 加载新页面后优先按这个精确 key 找到新增行；只有旧模板或兼容场景才退回 href / 文本 token 定位。因此不再因为同一天、同金额或相似成员名称而高亮错误记录。
+
+定位后继续执行滚动到视口中央、DOM focus，并保留约 4.2 秒的高亮边框、背景和阴影。
+
+后台四个表单补齐各自的 `data-return-anchor`；前台报销表单原先错误返回消费流水区域，改为 `reimbursement-records`。
+
+### 31.3 自动报销在消费详情、前台和后台报销流水统一可见
+
+自动报销继续使用既有账务模型：
+
+```text
+public_paid_amount_cent = min(消费金额, 经手人可用代管余额)
+```
+
+这笔金额已经在持有人余额计算中作为公共资金消费扣减，因此不能再额外 INSERT 一条普通 `reimbursements`，否则会重复扣款。
+
+本轮不改变账务数据模型，而是在前台 `/assets` 和后台 `/admin` 的“报销流水”中，直接根据 `.Expenses[].AutoReimbursedCent` 派生显示自动报销行，并沿用消费发生时间、经手人、原支付渠道和原消费凭证。后续人工报销仍来自 `.Reimbursements`。
+
+消费详情页原有“自动报销 + 后续报销”明细保持不变，所以三个入口现在口径一致。
+
+### 31.4 快速记录列表增加记录人和秒级时间
+
+`/quick-money-note` 列表新增“记录人”列。当前列表按登录成员查询本人记录，因此直接显示当前成员姓名，与 `created_by` 的查询范围一致。
+
+时间不再使用只保留日期的 `humanDate`。模板保留原始 RFC3339 时间，`quick-money.js` 在浏览器本地时区格式化为：
+
+```text
+YYYY-MM-DD HH:mm:ss
+```
+
+精确到秒。
+
+### 31.5 入库状态与正式数据详情链接
+
+快速记录标准化本身已经在同一 SQLite transaction 内完成：
+
+```text
+正式资金记录写入
++ 附件 entity 迁移
++ quick_money_notes.status = standardized
++ standardized_entity_type / standardized_entity_id 写入
+```
+
+因此本轮不重复修改状态事务，而是把列表中的 `standardized` 展示为可点击的“已入库”。
+
+新增统一详情入口：
+
+```text
+/money-record/{kind}/{id}
+```
+
+四类正式数据都可从“已入库”跳转查看对应记录；消费详情同时提供进入现有完整消费详情/编辑页的链接。该详情入口沿用 member/admin 身份与 `assets.view` 权限保护。
+
+### 31.6 验证与提交约束
+
+本轮保持以下约束：
+
+- 不创建 PR；
+- 所有需求只产生一次 Git commit；
+- 提交 title / description 以中文为主；
+- 分支只更新 `dev-2608C-step1`；
+- 新增详情 handler 使用 `gofmt` 风格；
+- JS 修改保持可由 `node --check` 校验的标准语法；
+- 模板仍由启动时 `templates/*.html` 的 ParseFS 统一解析。
+
+由于当前执行容器无法解析 `github.com`，无法 clone 仓库到本地执行真实 `go test ./...`；本轮通过 GitHub 远端源码逐文件核对路由、模板字段、响应头与 middleware 顺序，并在提交后再次读取远端文件/提交状态确认变更落盘。

@@ -20,4 +20,14 @@
       }
     }, true);
   }
+
+  document.querySelectorAll('[data-quick-created-at]').forEach((node) => {
+    const date = new Date(node.dataset.quickCreatedAt || '');
+    if (Number.isNaN(date.getTime())) {
+      node.textContent = node.dataset.quickCreatedAt || '';
+      return;
+    }
+    const pad = (value) => String(value).padStart(2, '0');
+    node.textContent = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  });
 })();
