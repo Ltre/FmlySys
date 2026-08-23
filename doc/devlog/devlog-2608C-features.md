@@ -314,3 +314,35 @@ quick_money_notes
 - 不创建 PR。
 
 实际 FIDO 跨设备二维码是否出现、国行三星对 hybrid transport 的系统实现，以及真实 SQLite 高并发/磁盘 I/O 延迟，仍需要在部署机器和真实终端做 E2E。这里不把静态检查等同于真实设备验证。
+
+## 30. 修复 V3 资金工作流启动编译失败
+
+日期：2026-08-24
+
+### 30.1 现象
+
+Windows 本地执行 `win-dev.start.cmd` 时，Go 编译阶段直接失败：
+
+```text
+internal\httpserver\money_workflow_v3.go:11:2: "github.com/Ltre/FmlySys/internal/store" imported and not used
+```
+
+服务因此完全没有启动。
+
+### 30.2 根因与修复
+
+第 29 节新增 `money_workflow_v3.go` 时曾在设计阶段直接引用 `store` 包，最终实现改为全部通过 `s.Store` 方法访问 Store，但 import 列表中残留了：
+
+```go
+"github.com/Ltre/FmlySys/internal/store"
+```
+
+Go 编译器禁止未使用 import，因此虽然 `go/parser` 语法解析能通过，真实编译必然失败。
+
+本轮删除该残留 import，不修改 V3 资金工作流行为、路由、事务或数据模型。
+
+### 30.3 验证边界修正
+
+这次问题说明仅做 parser 语法检查不足以作为 Go 代码提交的编译级验证。后续应优先执行真实 `go test ./...` 或至少 `go build ./cmd/fmlysys`；只有依赖/网络环境确实阻断真实编译时，才退化为 parser 检查并明确标注限制。
+
+当前执行环境仍无法解析 `github.com`，无法在此处重新拉取仓库并运行完整 Go build；但本次失败点已经由用户本地编译器精确定位，修复仅删除确认未使用的 import。
