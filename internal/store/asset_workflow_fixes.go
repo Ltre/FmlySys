@@ -216,7 +216,7 @@ func (s *Store) AssetMovementsDetailed(ctx context.Context) ([]AssetEvent, error
 		return nil, err
 	}
 
-	reimbursementRows, err := s.DB.QueryContext(ctx, `SELECT r.id,r.amount_cent,h.name,e.title,recv.name,r.occurred_at FROM reimbursements r JOIN public_expenses e ON e.id=r.expense_id JOIN members h ON h.id=r.payer_holder_meb_id JOIN members recv ON recv.id=r.receiver_member_id WHERE r.status='active'`)
+	reimbursementRows, err := s.DB.QueryContext(ctx, `SELECT r.id,r.amount_cent,h.name,e.title,recv.name,r.occurred_at FROM reimbursements r JOIN public_expenses e ON e.id=r.expense_id JOIN members h ON h.id=r.payer_holder_member_id JOIN members recv ON recv.id=r.receiver_member_id WHERE r.status='active'`)
 	if err != nil {
 		return nil, err
 	}

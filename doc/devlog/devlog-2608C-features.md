@@ -481,3 +481,106 @@ Word/Excel/PPT 等不适合浏览器直接预览的类型仍保持下载。消�
 - 新增测试覆盖 urlencoded/multipart 金额解析、媒体凭证允许列表、内联预览类型判断、资产流水人类可读类型及消费报销负数语义。
 
 当前执行环境无法解析 `github.com` 并补齐 Go Module 依赖，因此没有声称已运行全仓 `go test ./...`。本轮不需要新增数据库 migration。
+
+## 26. 后台报销流水 SQL 修复与 Passkey 登录入口收敛
+
+日期：2026-08-23  
+
+### 26.1 后台 `payer_holder_meb_id` SQL 错误
+
+问题由第 25 节新增“消费报销”合成流水时引入。`reimbursements` 表真实字段为：
+
+```text
+payer_holder_member_id
+```
+
+但 `AssetMovementsDetailed()` 的后续报销查询误写为：
+
+```text
+payer_holder_meb_id
+```
+
+因此 `/admin` 读取完整资产变动流水时 SQLite 直接返回 `no such column`。本轮修正为真实字段名；既有回归测试中使用真实 schema 字段，后续只要测试真正执行即可覆盖该类拼写错误。
+
+### 26.2 Passkey Session 正式作为前台登录态
+
+此前虽然创建/验证 Passkey 后已经生成 `fmly_passkey_identity` Session，但首页 `/` 仍只经过旧 `member()` 中间件，只认可 `fmly_session`。因此出现：
+
+```text
+Passkey 已成功创建或验证
+→ 技术上已有 Passkey identity Session
+→ 前台首页仍判断“未登录”
+```
+
+这与既定语义“Passkey 本身是该登录身份的充分必要认证依据”不一致。
+
+本轮新增 Passkey-aware 前门：
+
+```text
+GET /
+→ 优先复用有效 fmly_session
+→ 否则检查 fmly_passkey_identity
+```
+
+若 Passkey 身份已经关联 `member_id`：
+
+```text
+Passkey identity
+→ 读取对应 active member + member permissions
+→ 自动补建 fmly_session
+→ 直接渲染正常首页总览
+```
+
+若尚未关联家族成员：
+
+```text
+Passkey identity
+→ 仍视为“已登录”
+→ 进入首页总览壳
+→ 明确显示“Passkey 登录身份已建立、等待管理员关联家族成员”
+→ 不展示公共资产 / 家族事务 / 共享资料
+→ 不自动授予任何业务权限
+```
+
+由此将“认证成功”和“获得家族业务权限”分开：Passkey 足以建立登录态，但家族数据授权仍必须落到已关联成员及其权限。
+
+### 26.3 创建 / 找回 Passkey 后回首页
+
+Passkey 创建完成和已有 Passkey 验证找回完成后，不再把用户强制送到：
+
+```text
+/passkey/account?created=1
+/passkey/account?recovered=1
+```
+
+成功响应统一改为进入：
+
+```text
+/
+```
+
+`/passkey/account` 回归为“用户个人信息 / Passkey 管理页”，不再承担登录后的默认落地页。
+
+### 26.4 前台 Header 的个人信息入口
+
+前台 Header 原先单独展示“通行密钥”主菜单，同时用户名只是不可点击文本。本轮调整为：
+
+- 移除 Header 主导航中的“通行密钥”入口；
+- 右上角用户名改为“用户个人信息”链接，统一进入 `/account`；
+- 当前存在 Passkey identity Session 时，`/account` 进入 `/passkey/account`；
+- 普通成员会话没有 Passkey identity 时，`/account` 进入现有 Passkey 说明页。
+
+尚未关联成员的 Passkey 身份首页也提供相同的右上角个人信息入口。
+
+### 26.5 验证与边界
+
+本轮完成：
+
+- 修正 `AssetMovementsDetailed()` 的后续报销 JOIN 字段拼写；
+- 新增 Passkey 成功响应重写测试，验证成功响应跳转 `/` 且 `Set-Cookie` 不丢失；
+- 新增失败响应保持原状态码/正文的回归测试；
+- 新增 Go 文件及启动入口执行 `gofmt`；
+- 新增独立的未关联 Passkey 首页模板，并检查模板字段与现有数据结构一致；
+- 未新增数据库 migration。
+
+当前执行环境仍无法解析 `github.com`，因此没有声称已完整运行 `go test ./...`。实际部署后重点验证：后台 `/admin` 正常加载、Passkey 创建后进入首页、已关联 Passkey 身份可直接看到正常首页、未关联身份进入受限首页、右上角用户名可进入个人 Passkey 页面。
