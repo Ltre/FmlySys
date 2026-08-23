@@ -1,0 +1,16 @@
+{{define "quick-money-note.html"}}<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title><link rel="stylesheet" href="/static/app.css"><style>.quick-category-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:10px}.quick-category{display:flex;align-items:center;gap:8px;padding:14px;border:2px solid #d9e2f3;border-radius:12px;background:#f7faff;cursor:pointer}.quick-category:has(input:checked){border-color:#1a73e8;background:#e8f0fe}.quick-category input{width:20px;height:20px}</style></head><body>{{template "nav" .}}<main class="wrap">
+<div class="section-head"><div><h1>快速记录（稍后整理数据）</h1><p class="muted">先把票据、截图和一句摘要留下，之后再补齐正式账务字段。快速记录本身不会改变公共资产余额。</p></div><a href="/">← 返回首页</a></div>
+<section class="card quick-money-compose"><h2>快速记一笔</h2><form method="post" action="/quick-money-note" enctype="multipart/form-data" class="form" data-success="快速记录已保存">
+<div class="wide"><strong>记录分类</strong><p class="muted">必须且只能选择一类。</p><div class="quick-category-grid">
+<label class="quick-category"><input type="checkbox" name="category" value="expense" data-quick-category> <strong>公共消费</strong></label>
+<label class="quick-category"><input type="checkbox" name="category" value="transfer" data-quick-category> <strong>内部转账</strong></label>
+<label class="quick-category"><input type="checkbox" name="category" value="reimbursement" data-quick-category> <strong>登记报销</strong></label>
+<label class="quick-category"><input type="checkbox" name="category" value="asset_event" data-quick-category> <strong>资产变动登记</strong></label>
+</div></div>
+<label class="wide upload"><strong>票据 / 截图 / 文档</strong><span>可先上传照片、视频、音频、PDF、TXT、Office 文档等；正式入库时会沿用这些文件。</span><input type="file" name="evidence" multiple accept="image/*,video/*,audio/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx"></label>
+<label class="wide"><strong>简短摘要</strong><textarea name="summary" maxlength="1000" rows="4" placeholder="例如：今晚超市采购家庭公共用品 328 元，微信支付；小票已拍照。" required></textarea></label>
+<button class="wide">保存快速记录</button>
+</form></section>
+<section class="card"><h2>快速记录列表</h2><table><tr><th>时间</th><th>分类</th><th>摘要</th><th>文件</th><th>状态</th><th>操作</th></tr>
+{{range .Notes}}<tr><td>{{humanDate .CreatedAt}}</td><td>{{.CategoryLabel}}</td><td>{{.Summary}}</td><td>{{range .Evidence}}<a class="attachment" href="/evidence/{{.ID}}">{{.OriginalName}}</a>{{else}}—{{end}}</td><td>{{if eq .Status "draft"}}待整理{{else}}已入库{{end}}</td><td>{{if eq .Status "draft"}}<a class="secondary-button" href="/quick-money-note-to-standarized?id={{.ID}}">进行数据入库</a>{{else}}<span class="muted">{{.StandardizedEntityType}} #{{.StandardizedEntityID}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="6">暂无快速记录</td></tr>{{end}}</table></section>
+</main><script src="/static/quick-money.js" defer></script></body></html>{{end}}
