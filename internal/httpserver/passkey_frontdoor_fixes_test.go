@@ -47,3 +47,20 @@ func TestRewritePasskeyErrorUnchanged(t *testing.T) {
 		t.Fatalf("error response was rewritten: %s", rec.Body.String())
 	}
 }
+
+func TestPasskeyFrontDoorOnlyInterceptsExactRoot(t *testing.T) {
+	s := &Server{}
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	handler := s.WithPasskeyFrontDoorFixes(next)
+
+	for _, path := range []string{"/login", "/static/app.css", "/assets", "/admin"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("GET %s status=%d want=%d; non-root GET must pass through", path, rec.Code, http.StatusNoContent)
+		}
+	}
+}

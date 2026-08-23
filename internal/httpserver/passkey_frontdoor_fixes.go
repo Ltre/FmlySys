@@ -20,7 +20,7 @@ type passkeyHomeView struct {
 // authenticated home shell without family business permissions.
 func (s *Server) WithPasskeyFrontDoorFixes(next http.Handler) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /", s.passkeyAwareDashboard)
+	mux.HandleFunc("GET /{$}", s.passkeyAwareDashboard)
 	mux.HandleFunc("GET /account", s.frontAccountEntry)
 	mux.HandleFunc("POST /auth/passkey/create/finish", rewritePasskeySuccessToHome(next))
 	mux.HandleFunc("POST /auth/passkey/login/finish", rewritePasskeySuccessToHome(next))

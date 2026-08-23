@@ -584,3 +584,100 @@ Passkey 创建完成和已有 Passkey 验证找回完成后，不再把用户强
 - 未新增数据库 migration。
 
 当前执行环境仍无法解析 `github.com`，因此没有声称已完整运行 `go test ./...`。实际部署后重点验证：后台 `/admin` 正常加载、Passkey 创建后进入首页、已关联 Passkey 身份可直接看到正常首页、未关联身份进入受限首页、右上角用户名可进入个人 Passkey 页面。
+
+## 27. 修复 Passkey 前门导致的 `/login` 无限重定向
+
+日期：2026-08-23  
+
+### 27.1 现象
+
+第 26 节上线后，访问首页会跳到 `/login`，而 `/login` 本身继续重定向到 `/login`，浏览器最终报：
+
+```text
+ERR_TOO_MANY_REDIRECTS
+```
+
+该问题与 Passkey Cookie 内容本身无关，也不需要把“删除 Cookie”作为修复方案。
+
+### 27.2 根因
+
+第 26 节在外层 `http.ServeMux` 注册了：
+
+```go
+mux.HandleFunc("GET /", s.passkeyAwareDashboard)
+```
+
+项目使用 Go 1.23。新版 `net/http.ServeMux` 中，路径模式 `/` 是子树模式；增加 `GET` 方法限定后，`GET /` 仍会匹配所有未被同一 mux 中更具体模式截获的 GET 子路径，而不是只匹配网站根路径。
+
+因此外层路由实际上形成：
+
+```text
+GET /
+GET /login
+GET /static/app.css
+GET /assets
+GET /admin
+...
+        ↓
+全部进入 passkeyAwareDashboard
+```
+
+当用户没有有效前台 Session 时，`passkeyAwareDashboard` 会重定向到 `/login`；但新请求 `GET /login` 又再次被同一个首页处理器截获，于是形成：
+
+```text
+/login
+→ passkeyAwareDashboard
+→ /login
+→ passkeyAwareDashboard
+→ /login
+→ ...
+```
+
+### 27.3 修复方式
+
+首页前门改为 Go 1.22+ ServeMux 支持的精确根路径模式：
+
+```go
+mux.HandleFunc("GET /{$}", s.passkeyAwareDashboard)
+```
+
+`{$}` 只匹配路径结尾，因此 `GET /{$}` 只处理真正的 `/`。
+
+其余路径继续交给下层现有 Router：
+
+```text
+/login          → 原 loginPage
+/static/...     → 原静态文件处理器
+/assets         → 原成员权限路由
+/admin          → 原后台路由
+/account        → Passkey 前门显式个人信息入口
+```
+
+这样保留第 26 节“Passkey identity Session 可直接构成前台登录态”的设计，同时消除外层 mux 对整站 GET 请求的误拦截。
+
+### 27.4 回归测试
+
+在 `passkey_frontdoor_fixes_test.go` 新增路由范围测试：构造一个不依赖 Store 的下层 handler，并验证：
+
+```text
+GET /login
+GET /static/app.css
+GET /assets
+GET /admin
+```
+
+都必须透传到下层 handler。
+
+该测试针对本次真实根因；如果以后误把 `GET /{$}` 改回 `GET /`，上述请求会被 `passkeyAwareDashboard` 抢占，测试会直接失败。
+
+### 27.5 验证与边界
+
+本轮完成：
+
+- `go.mod` 已确认项目使用 Go 1.23，支持 `{$}` 精确根路径模式；
+- 修改后的 Go 文件和测试已执行 `gofmt`；
+- 新增非根 GET 透传回归测试；
+- 不修改 Passkey Session、成员 Session 或 Cookie 数据结构；
+- 不新增 migration。
+
+当前执行环境仍无法从 GitHub 拉取缺失 Go Module，因此不声称已执行完整 `go test ./...`。本次修复只收窄外层首页路由的匹配范围，不改变已有认证和授权语义。
