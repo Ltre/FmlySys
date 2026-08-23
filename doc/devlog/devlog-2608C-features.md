@@ -681,3 +681,81 @@ GET /admin
 - 不新增 migration。
 
 当前执行环境仍无法从 GitHub 拉取缺失 Go Module，因此不声称已执行完整 `go test ./...`。本次修复只收窄外层首页路由的匹配范围，不改变已有认证和授权语义。
+
+## 28. 后台异步普通表单 multipart 兼容修复
+
+日期：2026-08-23  
+
+### 28.1 现象与共同根因
+
+后台出现两类看似无关、实际同源的问题：
+
+- `/admin/passkeys/{id}/bind` 明明选择了成员，仍返回“成员 ID 无效”；
+- `/admin/members` 明明填写了成员姓名，仍返回“成员姓名不能为空”。
+
+浏览器抓包确认两者都带 `X-Fmly-Async: 1`，并由全局异步表单增强发送为 `multipart/form-data`。对应旧 handler 使用 `r.ParseForm()` 读取普通字段；Go 的 `ParseForm()` 不负责解析 multipart body，因此 `member_id`、`name`、`relation`、`permissions` 等字段在 handler 看来为空。
+
+这不是 Passkey 关联逻辑或成员数据库校验本身的问题，而是统一表单传输格式与旧 handler 解析方式不一致。相同风险还覆盖成员权限、加入申请审核等由全局异步表单增强接管的普通 POST。
+
+### 28.2 统一兼容层
+
+新增 `WithAsyncMultipartFormCompatibility`，放在统一请求链中，而不是分别给每个业务 handler 打补丁。
+
+处理条件收敛为：
+
+```text
+X-Fmly-Async: 1
++ multipart/form-data
++ Content-Length > 0 且 <= 1 MiB
+```
+
+兼容层先解析小型 multipart。若请求只有普通字段、没有文件，则把全部字段重新编码为：
+
+```text
+application/x-www-form-urlencoded
+```
+
+并重置 `Form/PostForm/MultipartForm`，让下游原有 `ParseForm()` 按其既有设计重新解析。多值字段不会丢失，例如成员权限的多个 `permissions` 会按原顺序保留。
+
+因此用户抓包中的：
+
+```text
+member_id=1
+```
+
+和：
+
+```text
+name=...
+relation=...
+permissions=assets.view
+permissions=assets.self_change
+...
+```
+
+都会被旧 handler 正常读取。
+
+### 28.3 文件上传不被误改写
+
+如果小型 multipart 中实际存在文件 part，兼容层保持 multipart，不转换为 urlencoded；已经解析得到的 `MultipartForm` 继续交给下游原上传处理器使用。
+
+超过 1 MiB 的 multipart 不在此兼容层预解析，继续由消费凭证、共享附件等各自原有上传流程、大小限制和文件校验负责。
+
+这样避免为了修普通后台表单而绕过或削弱已有上传限制。
+
+### 28.4 请求 deadline 恢复
+
+兼容层挂载在 `WithRequestDeadline` 外层、`WithEnhancedFormResponses` 内层。字段型 multipart 被规范化成 urlencoded 后再进入 request-deadline middleware，因此不再因为浏览器使用 FormData 就被错误当成“大文件上传”而跳过 15 秒普通数据库请求超时保护。
+
+真正包含文件的请求仍保持 multipart，因此继续按原规则排除上传耗时，不受普通数据库 deadline 误伤。
+
+### 28.5 验证与边界
+
+本轮完成：
+
+- 新增兼容层和回归测试均执行 `gofmt`；
+- 用仅依赖 Go 标准库的隔离测试真实执行 `go test`，覆盖：字段型 multipart 转为 urlencoded；`member_id`、中文 `name`、重复 `permissions` 均可由 `ParseForm()` 读出；带文件的 multipart 保持原格式并能继续读取文件；
+- 启动入口接入兼容层，顺序为增强响应 → multipart 兼容 → request deadline → 业务路由；
+- 不修改 Passkey/成员数据模型，不新增 migration。
+
+当前执行环境仍无法从 GitHub 拉取项目缺失依赖，因此不声称已执行全仓 `go test ./...`；但本轮新增兼容层及其标准库隔离测试已实际运行通过。

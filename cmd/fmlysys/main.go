@@ -59,6 +59,7 @@ func main() {
 	handler = app.WithAssetWorkflowFixes(handler)
 	handler = app.WithPasskeyFrontDoorFixes(handler)
 	handler = httpserver.WithRequestDeadline(handler, 15*time.Second)
+	handler = httpserver.WithAsyncMultipartFormCompatibility(handler)
 	handler = httpserver.WithEnhancedFormResponses(handler)
 	srv := &http.Server{Addr: cfg.Addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
