@@ -131,6 +131,7 @@ type Evidence struct {
 type Matter struct {
 	ID                                                                           int64
 	ParentID                                                                     *int64
+	ParentIDValue, OwnerMemberID                                                 int64
 	ParentTitle, Title, Type, Description, Status, StartDate, DueDate, OwnerName string
 	ExpenseCent                                                                  int64
 }

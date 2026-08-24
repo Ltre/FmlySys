@@ -46,6 +46,6 @@ func (s *Server) WithAdminMemberDelete(next http.Handler) http.Handler {
 			s.fail(w, r, err)
 			return
 		}
-		redirect(w, r, "/admin#members-and-permissions")
+		redirect(w, r, "/admin/authorities")
 	})
 }

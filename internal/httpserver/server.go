@@ -66,6 +66,7 @@ type view struct {
 	ExpenseRefunds    []store.Reimbursement
 	Matters           []store.Matter
 	Archives          []store.Archive
+	AdminQuickNotes   []store.AdminQuickMoneyNote
 	PendingJoins      []store.JoinRequest
 	JoinRequest       store.JoinRequest
 	WeChatConfigured  bool
@@ -157,14 +158,18 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /matters", s.member("matters.view", s.matters))
 	s.mux.HandleFunc("POST /matters", s.member("matters.manage", s.createMatter))
+	s.mux.HandleFunc("POST /matters/{id}", s.member("matters.manage", s.updateMatter))
 	s.mux.HandleFunc("POST /matters/{id}/status", s.member("matters.manage", s.setMatterStatus))
 	s.mux.HandleFunc("GET /share", s.member("share.view", s.share))
 	s.mux.HandleFunc("POST /share", s.member("share.manage", s.createArchive))
+	s.mux.HandleFunc("POST /share/{id}", s.member("share.manage", s.updateArchive))
 	s.mux.HandleFunc("POST /share/{id}/attachments", s.member("share.manage", s.uploadArchive))
+	s.mux.HandleFunc("POST /share/{id}/attachments/{attachmentID}/delete", s.member("share.manage", s.deleteArchiveAttachment))
 	s.mux.HandleFunc("GET /files/{id}", s.member("share.view", s.file))
 
 	// Authenticated administrator business console.
 	s.mux.HandleFunc("GET /admin", s.adminOnly(s.admin))
+	s.mux.HandleFunc("GET /admin/authorities", s.adminOnly(s.adminAuthorities))
 	s.mux.HandleFunc("POST /admin/members", s.adminOnly(s.adminCreateMember))
 	s.mux.HandleFunc("POST /admin/members/{id}/permissions", s.adminOnly(s.adminSetPermissions))
 	s.mux.HandleFunc("POST /admin/join/{id}/approve", s.adminOnly(s.adminApproveJoin))
@@ -695,7 +700,29 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	v.AdminQuickNotes, err = s.Store.AdminQuickMoneyNotes(r.Context())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	s.render(w, "admin.html", v)
+}
+
+func (s *Server) adminAuthorities(w http.ResponseWriter, r *http.Request) {
+	v := s.base("成员与权限")
+	v.AdminUsername = currentAdmin(r).Username
+	var err error
+	v.Members, err = s.familyMembers(r.Context())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	v.MemberPermissions, err = s.Store.AllMemberPermissions(r.Context())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.render(w, "admin-authorities.html", v)
 }
 
 func (s *Server) matters(w http.ResponseWriter, r *http.Request) {
@@ -979,6 +1006,31 @@ func (s *Server) createMatter(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, "/matters")
 }
 
+func matterInputFromRequest(r *http.Request) store.MatterInput {
+	return store.MatterInput{
+		ParentID:      parseID(r.FormValue("parent_id")),
+		Title:         r.FormValue("title"),
+		Type:          r.FormValue("type"),
+		Description:   r.FormValue("description"),
+		Status:        r.FormValue("status"),
+		StartDate:     r.FormValue("start_date"),
+		DueDate:       r.FormValue("due_date"),
+		OwnerMemberID: parseID(r.FormValue("owner_id")),
+	}
+}
+
+func (s *Server) updateMatter(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if err := s.Store.UpdateMatter(r.Context(), currentMember(r).ID, parseID(r.PathValue("id")), matterInputFromRequest(r)); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, "/matters#matter-"+r.PathValue("id"))
+}
+
 func (s *Server) setMatterStatus(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		s.fail(w, r, err)
@@ -1004,8 +1056,20 @@ func (s *Server) createArchive(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, "/share")
 }
 
+func (s *Server) updateArchive(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if err := s.Store.UpdateFamilyArchive(r.Context(), currentMember(r).ID, parseID(r.PathValue("id")), r.FormValue("title"), r.FormValue("category"), r.FormValue("content")); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, "/share#archive-"+r.PathValue("id"))
+}
+
 func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(52 << 20); err != nil {
+	if err := r.ParseMultipartForm(220 << 20); err != nil {
 		s.fail(w, r, err)
 		return
 	}
@@ -1014,11 +1078,23 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, fmt.Errorf("请选择附件"))
 		return
 	}
-	if err := s.Store.SaveArchiveAttachment(r.Context(), currentMember(r).ID, parseID(r.PathValue("id")), filepath.Join(s.PM.ActiveDir, "uploads"), file[0]); err != nil {
+	for _, header := range file {
+		if err := s.Store.SaveArchiveAttachment(r.Context(), currentMember(r).ID, parseID(r.PathValue("id")), filepath.Join(s.PM.ActiveDir, "uploads"), header); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
+	redirect(w, r, "/share")
+}
+
+func (s *Server) deleteArchiveAttachment(w http.ResponseWriter, r *http.Request) {
+	archiveID := parseID(r.PathValue("id"))
+	attachmentID := parseID(r.PathValue("attachmentID"))
+	if err := s.Store.DeleteFamilyArchiveAttachment(r.Context(), currentMember(r).ID, archiveID, attachmentID, filepath.Join(s.PM.ActiveDir, "uploads")); err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	redirect(w, r, "/share")
+	redirect(w, r, "/share#archive-"+r.PathValue("id"))
 }
 
 func (s *Server) file(w http.ResponseWriter, r *http.Request) {
@@ -1044,7 +1120,7 @@ func (s *Server) adminCreateMember(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	redirect(w, r, "/admin")
+	redirect(w, r, "/admin/authorities")
 }
 
 func (s *Server) adminSetPermissions(w http.ResponseWriter, r *http.Request) {
@@ -1056,7 +1132,7 @@ func (s *Server) adminSetPermissions(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	redirect(w, r, "/admin")
+	redirect(w, r, "/admin/authorities#member-"+r.PathValue("id"))
 }
 
 func (s *Server) adminApproveJoin(w http.ResponseWriter, r *http.Request) {

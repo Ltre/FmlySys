@@ -158,3 +158,99 @@ MatterTitle
 - 检查新 Go 文件 import 均有实际引用，避免再次出现未使用 import 导致启动失败。
 
 当前执行容器无法解析 `github.com`，无法 clone 完整仓库并真实运行 `go test ./...` / `go build ./cmd/fmlysys`。因此本轮不把静态检查描述成完整编译通过；提交后仍应以用户本地 `win-dev.start.cmd` 的真实 Go 编译作为最终编译级验证。
+
+## 33. Passkey 可撤销、权限管理迁移、完整编辑与悬浮快捷入口
+
+日期：2026-08-24
+
+### 33.1 本轮审计与设计判断
+
+本轮接续上次因网络问题中断的开发，先逐项核对九项需求的路由、Store、模板、权限和测试。记录的是可复核的设计依据与结果：
+
+- Passkey 凭据是登录方式，不是成员业务数据；删除凭据只能影响认证能力，不能删除或软删除已绑定的成员。
+- 成员与权限属于独立后台管理域，不再挤在总览页。新页保留成员资料、权限和软删除三类各自独立的写操作。
+- “完整编辑”不仅是更改标题：事务要覆盖父事务、类型、说明、状态、日期和负责人；共享信息要覆盖标题、分类、正文与附件生命周期。
+- 前台悬浮菜单是权限受控的便捷入口，不代替服务端的权限检查。后台悬浮菜单仍由管理员会话边界保护。
+- 微信禁用是临时的全站安全门，应在服务端生效，避免仅靠 JavaScript 被绕过。静态资源与健康检查保持可用，写请求直接拒绝。
+
+### 33.2 Passkey 列表删除
+
+后台 `/admin/passkeys` 的每个凭据新增删除表单和二次确认，路由为 `POST /admin/passkeys/credentials/{id}/delete`。Store 在事务内删除指定凭据：
+
+- 身份仍有其他凭据时，保留 Passkey 登录身份及成员绑定；
+- 删除最后一枚凭据时，清理已无法登录的空 Passkey identity，以便该手机号重新注册；
+- 无论哪种情况，`members` 行、成员资料、权限及业务流水均不受影响。
+
+同时修复 `AllPasskeyLoginIdentities` 在 SQLite 单连接配置下边遍历外层 rows 边再查询凭据产生的等待：先完成并关闭外层查询，再逐个装载凭据。
+
+### 33.3 后台页面与成员管理
+
+- 内部转账流水原生模板增加“用途/事务”列，直接使用 Store 已返回的 `Purpose` 与 `MatterTitle`。
+- 新增 `/admin/authorities` 成员与权限页，Header 入口紧跟“Passkey 管理”；后台总览移除原成员权限区域。
+- 成员可修改姓名和关系/备注，权限保存、资料保存和标记删除仍分开，各自走原子写入与审计逻辑。
+- 总览页直接由 Go 模板渲染前台快速记录、转账新列和悬浮菜单；不再在 GET `/admin` 响应尾部注入历史 `admin-enhancements.js`。第 32.5 节的注入方案因本次原生模板整合而被取代，保留其写接口与快速记录标准化能力。
+
+### 33.4 微信内置浏览器临时禁用
+
+新增 `WithWeChatBrowserGuard` 中间件，通过 User-Agent 中的 `MicroMessenger` 判定微信内置浏览器：
+
+- GET / HEAD 返回占满视口、不可关闭的引导遮罩，提示用户从菜单转到系统浏览器，并提供当前地址复制。
+- POST 等写请求返回 HTTP 403，防止遮罩下仍能发起业务变更。
+- `/static/` 和 `/healthz` 放行；响应使用 `no-store` 且按 User-Agent 区分缓存。
+
+此处是可移除的服务端包装层，微信扫码功能稳定后可通过移除 `cmd/fmlysys/main.go` 的一处包装恢复微信内使用。
+
+### 33.5 前台事务与信息共享完整编辑
+
+事务页增加 `POST /matters/{id}`，可更新父事务、标题、类型、说明、状态、开始/截止日期和负责人。Store 统一创建与编辑校验，拒绝：
+
+- 空标题、非法类型/状态/日期；
+- 已删除或不存在的负责人；
+- 不存在的父事务、自指向，以及通过子孙节点形成的环。
+
+信息共享页增加 `POST /share/{id}` 更新标题、分类和正文；附件支持一次追加多个文件，并可通过独立路由删除单个附件。删除附件只删除附件元数据和对应文件，不删除共享资料本身；所有编辑与删除均写入审计。
+
+### 33.6 前后台可拖动悬浮菜单
+
+新增共用 `floating-actions.js` 和样式，支持指针拖动、视口边界限制、位置持久化、拖动后抑制误触、点击外部或 Escape 收起菜单。
+
+前台公共资产页菜单按权限显示：
+
+| 菜单 | 权限 |
+| --- | --- |
+| 登记资产变动 | `assets.self_change` |
+| 新增公共消费 | `expenses.create` |
+| 与其他成员转账 | `transfers.create` |
+| 登记报销 | `reimbursements.create` |
+| 四类流水入口 | 页面本身已要求 `assets.view` |
+
+后台总览页菜单包含微信加入申请、公共财产总览、四类登记入口和四类流水入口，所有目标都是原生页面锚点。
+
+### 33.7 数据库与兼容性
+
+本轮复用已有表和字段，无需新增 migration。管理员、成员权限、Passkey identity 和业务对象仍使用既有边界；页面的显隐控制不放宽 handler 的权限校验。
+
+### 33.8 测试与验收
+
+新增回归测试覆盖：
+
+- Passkey 删除一枚凭据时保留 identity/成员，删除最后一枚时仅清理 identity，成员始终保留；
+- 事务全字段更新与父子环路拒绝；
+- 共享资料更新、单附件删除、主资料保留；
+- 微信 GET 遮罩、微信写请求拒绝、非微信与静态资源放行。
+
+本次在完整仓库上实际执行并通过：
+
+```text
+go test ./internal/store ./internal/httpserver
+go test ./...
+go test ./web
+node --check web/static/app.js
+node --check web/static/asset-workflow.js
+node --check web/static/record-focus.js
+node --check web/static/passkeys.js
+node --check web/static/quick-money.js
+node --check web/static/floating-actions.js
+```
+
+因此，第 32.6 节关于“网络环境下无法真实运行 Go 测试”的时点性说明，已被本节的实际全量测试结果取代。本轮按要求不暂存、不提交。

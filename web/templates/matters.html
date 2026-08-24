@@ -1,1 +1,64 @@
-{{define "matters.html"}}<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title><link rel="stylesheet" href="/static/app.css"></head><body>{{template "nav" .}}<main class="wrap"><h1>家族事务管理</h1>{{if hasPerm .Permissions "matters.manage"}}<section class="card"><h2>新建事务</h2><form method="post" action="/matters" class="form"><input name="title" placeholder="事务标题" required><input name="type" placeholder="类型，如 身后事/祖屋/通用"><select name="parent_id"><option value="">无父事务</option>{{range .Matters}}<option value="{{.ID}}">{{.Title}}</option>{{end}}</select><select name="owner_id"><option value="">负责人</option>{{range .Members}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select><select name="status"><option value="planned">计划中</option><option value="active">进行中</option><option value="done">已完成</option></select><input type="date" name="start_date"><input type="date" name="due_date"><textarea class="wide" name="description" placeholder="事项说明、准备内容、流程等"></textarea><button>创建事务</button></form></section>{{end}}<section class="card"><h2>事务列表</h2><table><tr><th>事务</th><th>层级/负责人</th><th>时间</th><th>关联公共支出</th><th>状态</th></tr>{{range .Matters}}<tr><td><strong>{{.Title}}</strong><br><span class="muted">{{.Type}} · {{.Description}}</span></td><td>{{if .ParentTitle}}父事务：{{.ParentTitle}}<br>{{end}}{{.OwnerName}}</td><td>{{.StartDate}} {{if .DueDate}}→ {{.DueDate}}{{end}}</td><td class="money">¥{{money .ExpenseCent}}</td><td>{{if hasPerm $.Permissions "matters.manage"}}<form method="post" action="/matters/{{.ID}}/status" class="actions"><select name="status"><option value="planned" {{if eq .Status "planned"}}selected{{end}}>计划中</option><option value="active" {{if eq .Status "active"}}selected{{end}}>进行中</option><option value="done" {{if eq .Status "done"}}selected{{end}}>已完成</option><option value="cancelled" {{if eq .Status "cancelled"}}selected{{end}}>取消</option></select><button>更新</button></form>{{else}}<span class="tag">{{.Status}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="5">暂无事务</td></tr>{{end}}</table></section></main></body></html>{{end}}
+{{define "matters.html"}}<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title><link rel="stylesheet" href="/static/app.css"></head>
+<body>{{template "nav" .}}
+<main class="wrap">
+  <h1>家族事务管理</h1>
+  {{if hasPerm .Permissions "matters.manage"}}
+  <section class="card">
+    <h2>新建事务</h2>
+    <form method="post" action="/matters" class="form">
+      <input name="title" placeholder="事务标题" required>
+      <input name="type" placeholder="类型，如 身后事/祖屋/通用">
+      <select name="parent_id"><option value="">无父事务</option>{{range .Matters}}<option value="{{.ID}}">{{.Title}}</option>{{end}}</select>
+      <select name="owner_id"><option value="">无负责人</option>{{range .Members}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select>
+      <select name="status"><option value="planned">计划中</option><option value="active">进行中</option><option value="done">已完成</option><option value="cancelled">已取消</option></select>
+      <input type="date" name="start_date"><input type="date" name="due_date">
+      <textarea class="wide" name="description" placeholder="事项说明、准备内容、流程等"></textarea>
+      <button>创建事务</button>
+    </form>
+  </section>
+  {{end}}
+
+  <section>
+    <h2>事务列表</h2>
+    <div class="matter-list">
+      {{range .Matters}}{{$matter := .}}
+      <article class="card matter-card" id="matter-{{$matter.ID}}">
+        <div class="section-head">
+          <div>
+            <h2>{{$matter.Title}} <span class="tag">{{$matter.Status}}</span></h2>
+            <p class="muted">{{$matter.Type}}{{if $matter.ParentTitle}} · 父事务：{{$matter.ParentTitle}}{{end}}{{if $matter.OwnerName}} · 负责人：{{$matter.OwnerName}}{{end}}</p>
+          </div>
+          <div class="money">关联公共支出 ¥{{money $matter.ExpenseCent}}</div>
+        </div>
+        {{if or $matter.StartDate $matter.DueDate}}<p class="muted">日期：{{$matter.StartDate}}{{if $matter.DueDate}} → {{$matter.DueDate}}{{end}}</p>{{end}}
+        <p class="pre-wrap">{{$matter.Description}}</p>
+        {{if hasPerm $.Permissions "matters.manage"}}
+        <details class="inline-editor">
+          <summary class="secondary-button">完整编辑事务</summary>
+          <form method="post" action="/matters/{{$matter.ID}}" class="form inner-form" data-success="事务已更新">
+            <input name="title" value="{{$matter.Title}}" placeholder="事务标题" required>
+            <input name="type" value="{{$matter.Type}}" placeholder="事务类型">
+            <select name="parent_id">
+              <option value="">无父事务</option>
+              {{range $.Matters}}{{if ne .ID $matter.ID}}<option value="{{.ID}}" {{if eq .ID $matter.ParentIDValue}}selected{{end}}>{{.Title}}</option>{{end}}{{end}}
+            </select>
+            <select name="owner_id">
+              <option value="">无负责人</option>
+              {{range $.Members}}<option value="{{.ID}}" {{if eq .ID $matter.OwnerMemberID}}selected{{end}}>{{.Name}}</option>{{end}}
+            </select>
+            <select name="status"><option value="planned" {{if eq $matter.Status "planned"}}selected{{end}}>计划中</option><option value="active" {{if eq $matter.Status "active"}}selected{{end}}>进行中</option><option value="done" {{if eq $matter.Status "done"}}selected{{end}}>已完成</option><option value="cancelled" {{if eq $matter.Status "cancelled"}}selected{{end}}>已取消</option></select>
+            <input type="date" name="start_date" value="{{$matter.StartDate}}"><input type="date" name="due_date" value="{{$matter.DueDate}}">
+            <textarea class="wide" name="description" placeholder="事项说明、准备内容、流程等">{{$matter.Description}}</textarea>
+            <button>保存全部修改</button>
+          </form>
+        </details>
+        {{end}}
+      </article>
+      {{else}}<section class="card"><p class="muted">暂无事务。</p></section>{{end}}
+    </div>
+  </section>
+</main>
+</body>
+</html>{{end}}

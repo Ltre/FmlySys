@@ -424,6 +424,45 @@ FROM passkey_login_credentials WHERE identity_id=? ORDER BY created_at DESC,id D
 	return out, rows.Err()
 }
 
+// DeletePasskeyLoginCredential removes the selected authenticator credential.
+// If it was the identity's last credential, the now-unusable login identity is
+// removed too so the phone number can create a fresh identity. The associated
+// family member is a parent record and is never deleted by either operation.
+func (s *Store) DeletePasskeyLoginCredential(ctx context.Context, credentialID int64) error {
+	if credentialID <= 0 {
+		return errors.New("Passkey 凭据不存在")
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var identityID int64
+	if err := tx.QueryRowContext(ctx, `SELECT identity_id FROM passkey_login_credentials WHERE id=?`, credentialID).Scan(&identityID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("Passkey 凭据不存在")
+		}
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM passkey_login_credentials WHERE id=?`, credentialID)
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected != 1 {
+		return errors.New("Passkey 凭据不存在")
+	}
+	var remaining int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM passkey_login_credentials WHERE identity_id=?`, identityID).Scan(&remaining); err != nil {
+		return err
+	}
+	if remaining == 0 {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM passkey_login_identities WHERE id=?`, identityID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *Store) AllPasskeyLoginIdentities(ctx context.Context) ([]PasskeyLoginIdentityView, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 SELECT p.id,p.phone,p.profile_remark,COALESCE(p.member_id,0),COALESCE(m.name,''),p.created_at,p.updated_at
@@ -440,13 +479,21 @@ ORDER BY p.created_at DESC,p.id DESC`)
 		if err := rows.Scan(&v.ID, &v.Phone, &v.ProfileRemark, &v.MemberID, &v.MemberName, &v.CreatedAt, &v.UpdatedAt); err != nil {
 			return nil, err
 		}
-		v.Credentials, err = s.PasskeyLoginCredentialViews(ctx, v.ID)
+		out = append(out, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Credentials, err = s.PasskeyLoginCredentialViews(ctx, out[i].ID)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, v)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) ActiveMembersForPasskey(ctx context.Context) ([]Member, error) {

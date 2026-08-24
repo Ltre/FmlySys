@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -12,11 +13,33 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
-func (s *Store) CreateArchive(ctx context.Context, actor int64, title, category, content, visibility string) (int64, error) {
+func normalizeArchiveFields(title, category, content string) (string, string, string, error) {
+	title = strings.TrimSpace(title)
+	category = strings.TrimSpace(category)
+	content = strings.TrimSpace(content)
 	if title == "" {
-		return 0, errors.New("资料标题不能为空")
+		return "", "", "", errors.New("资料标题不能为空")
+	}
+	if utf8.RuneCountInString(title) > 160 {
+		return "", "", "", errors.New("资料标题最多 160 个字符")
+	}
+	if category == "" {
+		category = "其他"
+	}
+	if utf8.RuneCountInString(category) > 80 {
+		return "", "", "", errors.New("资料分类最多 80 个字符")
+	}
+	return title, category, content, nil
+}
+
+func (s *Store) CreateArchive(ctx context.Context, actor int64, title, category, content, visibility string) (int64, error) {
+	var err error
+	title, category, content, err = normalizeArchiveFields(title, category, content)
+	if err != nil {
+		return 0, err
 	}
 	if visibility != "family" && visibility != "admin" {
 		visibility = "family"
@@ -35,6 +58,74 @@ func (s *Store) CreateArchive(ctx context.Context, actor int64, title, category,
 		return 0, err
 	}
 	return id, tx.Commit()
+}
+
+func (s *Store) UpdateFamilyArchive(ctx context.Context, actor, archiveID int64, title, category, content string) error {
+	if archiveID <= 0 {
+		return errors.New("共享资料不存在")
+	}
+	var err error
+	title, category, content, err = normalizeArchiveFields(title, category, content)
+	if err != nil {
+		return err
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var oldTitle, oldCategory, oldContent string
+	if err := tx.QueryRowContext(ctx, `SELECT title,category,content FROM archives WHERE id=? AND visibility='family'`, archiveID).Scan(&oldTitle, &oldCategory, &oldContent); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("共享资料不存在")
+		}
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE archives SET title=?,category=?,content=?,updated_at=?,version=version+1 WHERE id=? AND visibility='family'`, title, category, content, now(), archiveID); err != nil {
+		return err
+	}
+	if err := auditTx(ctx, tx, actor, "update", "archive", archiveID,
+		map[string]any{"title": oldTitle, "category": oldCategory, "content": oldContent, "visibility": "family"},
+		map[string]any{"title": title, "category": category, "content": content, "visibility": "family"}); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteFamilyArchiveAttachment(ctx context.Context, actor, archiveID, attachmentID int64, uploadDir string) error {
+	if archiveID <= 0 || attachmentID <= 0 {
+		return errors.New("附件不存在")
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var storage, original string
+	if err := tx.QueryRowContext(ctx, `
+SELECT a.storage_name,a.original_name
+FROM attachments a
+JOIN archives ar ON ar.id=a.archive_id
+WHERE a.id=? AND a.archive_id=? AND ar.visibility='family'`, attachmentID, archiveID).Scan(&storage, &original); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("附件不存在")
+		}
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM attachments WHERE id=? AND archive_id=?`, attachmentID, archiveID); err != nil {
+		return err
+	}
+	if err := auditTx(ctx, tx, actor, "delete", "attachment", attachmentID,
+		map[string]any{"archive_id": archiveID, "original_name": original}, nil); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(uploadDir, storage)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("附件记录已删除，但存储文件清理失败: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) Archives(ctx context.Context) ([]Archive, error) {
@@ -79,6 +170,13 @@ func (s *Store) Attachments(ctx context.Context, archiveID int64) ([]Attachment,
 func (s *Store) SaveArchiveAttachment(ctx context.Context, actor, archiveID int64, uploadDir string, header *multipart.FileHeader) error {
 	if header == nil || header.Size <= 0 {
 		return errors.New("附件为空")
+	}
+	var familyArchive int
+	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM archives WHERE id=? AND visibility='family')`, archiveID).Scan(&familyArchive); err != nil {
+		return err
+	}
+	if familyArchive == 0 {
+		return errors.New("共享资料不存在")
 	}
 	if header.Size > 50<<20 {
 		return errors.New("单个附件暂限 50MB")

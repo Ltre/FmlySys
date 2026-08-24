@@ -117,6 +117,18 @@ button[aria-busy="true"] {
 #transfer-records {
   scroll-margin-top: 96px;
 }
+#wechat-joins,
+#public-assets-overview,
+#admin-asset-entry,
+#admin-new-expense,
+#admin-transfer,
+#admin-reimbursement,
+#self-asset-change,
+#member-transfer,
+#reimbursement-records,
+#admin-quick-money-notes {
+  scroll-margin-top: 96px;
+}
 
 @media (max-width: 760px) {
   .quick-actions {

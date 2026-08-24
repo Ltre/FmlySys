@@ -1,1 +1,54 @@
-{{define "share.html"}}<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title><link rel="stylesheet" href="/static/app.css"></head><body>{{template "nav" .}}<main class="wrap"><h1>家族信息共享</h1>{{if hasPerm .Permissions "share.manage"}}<section class="card"><h2>新增共享资料</h2><form method="post" action="/share" class="form"><input name="title" placeholder="资料标题" required><select name="category"><option>家族信息</option><option>祖屋 / 宅基地</option><option>墓地 / 祠堂</option><option>办事资料</option><option>证件资料</option><option>照片</option><option>其他</option></select><textarea class="wide" name="content" placeholder="正文、说明、办事经验等"></textarea><button>保存为全家族可见资料</button></form></section>{{end}}<div class="grid">{{range .Archives}}<article class="card"><h2>{{.Title}}</h2><div><span class="tag">{{.Category}}</span></div><p style="white-space:pre-wrap">{{.Content}}</p>{{range .Attachments}}<a class="attachment" href="/files/{{.ID}}">📎 {{.OriginalName}}</a>{{end}}{{if hasPerm $.Permissions "share.manage"}}<form method="post" action="/share/{{.ID}}/attachments" enctype="multipart/form-data" class="form"><input type="file" name="file" required><button>上传附件</button></form>{{end}}</article>{{else}}<p class="muted">暂无共享资料。</p>{{end}}</div></main></body></html>{{end}}
+{{define "share.html"}}<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title><link rel="stylesheet" href="/static/app.css"></head>
+<body>{{template "nav" .}}
+<main class="wrap">
+  <h1>家族信息共享</h1>
+  {{if hasPerm .Permissions "share.manage"}}
+  <section class="card">
+    <h2>新增共享资料</h2>
+    <form method="post" action="/share" class="form">
+      <input name="title" placeholder="资料标题" maxlength="160" required>
+      <select name="category"><option>家族信息</option><option>祖屋 / 宅基地</option><option>墓地 / 祠堂</option><option>办事资料</option><option>证件资料</option><option>照片</option><option>其他</option></select>
+      <textarea class="wide" name="content" placeholder="正文、说明、办事经验等"></textarea>
+      <button>保存为全家族可见资料</button>
+    </form>
+  </section>
+  {{end}}
+
+  <div class="archive-list">
+    {{range .Archives}}{{$archive := .}}
+    <article class="card archive-card" id="archive-{{$archive.ID}}">
+      <div class="section-head"><div><h2>{{$archive.Title}}</h2><span class="tag">{{$archive.Category}}</span></div><span class="muted">创建于 {{humanDate $archive.CreatedAt}}</span></div>
+      <p class="pre-wrap">{{$archive.Content}}</p>
+
+      <div class="archive-attachments">
+        {{range $archive.Attachments}}
+        <div class="archive-attachment-item">
+          <a class="attachment" href="/files/{{.ID}}">📎 {{.OriginalName}}</a>
+          {{if hasPerm $.Permissions "share.manage"}}<form method="post" action="/share/{{$archive.ID}}/attachments/{{.ID}}/delete" data-no-async="1" onsubmit="return confirm('确认删除这个附件？删除后无法从共享页恢复。')"><button class="danger-button">删除附件</button></form>{{end}}
+        </div>
+        {{else}}<p class="muted">暂无附件</p>{{end}}
+      </div>
+
+      {{if hasPerm $.Permissions "share.manage"}}
+      <details class="inline-editor">
+        <summary class="secondary-button">完整编辑资料</summary>
+        <form method="post" action="/share/{{$archive.ID}}" class="form inner-form" data-success="共享资料已更新">
+          <input name="title" value="{{$archive.Title}}" placeholder="资料标题" maxlength="160" required>
+          <input name="category" value="{{$archive.Category}}" placeholder="资料分类" maxlength="80" required>
+          <textarea class="wide" name="content" placeholder="正文、说明、办事经验等">{{$archive.Content}}</textarea>
+          <button>保存全部修改</button>
+        </form>
+      </details>
+      <form method="post" action="/share/{{$archive.ID}}/attachments" enctype="multipart/form-data" class="form archive-upload">
+        <label class="wide upload"><strong>继续添加附件</strong><span>可一次选择多个文件；单个文件最大 50MB</span><input type="file" name="file" multiple required></label>
+        <button>上传附件</button>
+      </form>
+      {{end}}
+    </article>
+    {{else}}<section class="card"><p class="muted">暂无共享资料。</p></section>{{end}}
+  </div>
+</main>
+</body>
+</html>{{end}}

@@ -63,6 +63,7 @@ func main() {
 	handler = app.WithAdminEnhancements(handler)
 	handler = app.WithPasskeyUnifiedLogin(handler)
 	handler = app.WithPasskeyFrontDoorFixes(handler)
+	handler = httpserver.WithWeChatBrowserGuard(handler)
 	handler = httpserver.WithRequestDeadline(handler, 15*time.Second)
 	handler = httpserver.WithAsyncMultipartFormCompatibility(handler)
 	handler = httpserver.WithEnhancedFormResponses(handler)

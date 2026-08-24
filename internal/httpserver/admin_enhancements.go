@@ -1,10 +1,8 @@
 package httpserver
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
-	"strings"
 
 	"github.com/Ltre/FmlySys/internal/asset"
 	"github.com/Ltre/FmlySys/internal/store"
@@ -46,50 +44,8 @@ type adminQuickMoneyStandardizeView struct {
 	Matters       []store.Matter
 }
 
-type adminBufferedResponse struct {
-	header http.Header
-	body   bytes.Buffer
-	status int
-}
-
-func newAdminBufferedResponse() *adminBufferedResponse {
-	return &adminBufferedResponse{header: make(http.Header), status: http.StatusOK}
-}
-
-func (w *adminBufferedResponse) Header() http.Header         { return w.header }
-func (w *adminBufferedResponse) WriteHeader(status int)      { w.status = status }
-func (w *adminBufferedResponse) Write(p []byte) (int, error) { return w.body.Write(p) }
-
-func copyAdminBufferedResponse(dst http.ResponseWriter, src *adminBufferedResponse) {
-	for key, values := range src.header {
-		for _, value := range values {
-			dst.Header().Add(key, value)
-		}
-	}
-	dst.Header().Del("Content-Length")
-	dst.WriteHeader(src.status)
-	_, _ = dst.Write(src.body.Bytes())
-}
-
-func (s *Server) adminPageWithEnhancements(next http.Handler, w http.ResponseWriter, r *http.Request) {
-	buffered := newAdminBufferedResponse()
-	next.ServeHTTP(buffered, r)
-	if buffered.status == http.StatusOK && strings.Contains(strings.ToLower(buffered.body.String()), "</body>") {
-		buffered.header.Set("Content-Type", "text/html; charset=utf-8")
-		body := buffered.body.String()
-		const script = `<script src="/static/admin-enhancements.js" defer></script>`
-		if !strings.Contains(body, script) {
-			body = strings.Replace(body, "</body>", script+"</body>", 1)
-			buffered.body.Reset()
-			_, _ = buffered.body.WriteString(body)
-		}
-	}
-	copyAdminBufferedResponse(w, buffered)
-}
-
 func (s *Server) WithAdminEnhancements(next http.Handler) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /admin", func(w http.ResponseWriter, r *http.Request) { s.adminPageWithEnhancements(next, w, r) })
 	mux.HandleFunc("POST /admin/members/{id}/edit", s.adminOnly(s.adminUpdateMemberInfo))
 	mux.HandleFunc("POST /admin/members/{id}/delete", s.adminOnly(s.adminSoftDeleteMember))
 	mux.HandleFunc("GET /admin/api/quick-money-notes", s.adminOnly(s.adminQuickMoneyNotesJSON))
@@ -109,7 +65,7 @@ func (s *Server) adminUpdateMemberInfo(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	redirect(w, r, "/admin#members-and-permissions")
+	redirect(w, r, "/admin/authorities#member-"+r.PathValue("id"))
 }
 
 func (s *Server) adminSoftDeleteMember(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +73,7 @@ func (s *Server) adminSoftDeleteMember(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	redirect(w, r, "/admin#members-and-permissions")
+	redirect(w, r, "/admin/authorities")
 }
 
 func (s *Server) adminQuickMoneyNotesJSON(w http.ResponseWriter, r *http.Request) {
