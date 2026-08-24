@@ -3,8 +3,8 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title><link rel="stylesheet" href="/static/app.css"></head>
 <body>{{template "nav" .}}
 <main class="wrap">
-  <h1>家族信息共享</h1>
-  {{if hasPerm .Permissions "share.manage"}}
+  <div class="section-head"><div><h1>家族信息共享</h1><p class="muted">列表仅显示摘要，点击卡片查看完整正文和附件。</p></div></div>
+  {{if hasPerm .Permissions "share.manage_self"}}
   <section class="card">
     <h2>新增共享资料</h2>
     <form method="post" action="/share" class="form">
@@ -16,37 +16,14 @@
   </section>
   {{end}}
 
-  <div class="archive-list">
-    {{range .Archives}}{{$archive := .}}
-    <article class="card archive-card" id="archive-{{$archive.ID}}">
-      <div class="section-head"><div><h2>{{$archive.Title}}</h2><span class="tag">{{$archive.Category}}</span></div><span class="muted">创建于 {{humanDate $archive.CreatedAt}}</span></div>
-      <p class="pre-wrap">{{$archive.Content}}</p>
-
-      <div class="archive-attachments">
-        {{range $archive.Attachments}}
-        <div class="archive-attachment-item">
-          <a class="attachment" href="/files/{{.ID}}">📎 {{.OriginalName}}</a>
-          {{if hasPerm $.Permissions "share.manage"}}<form method="post" action="/share/{{$archive.ID}}/attachments/{{.ID}}/delete" data-no-async="1" onsubmit="return confirm('确认删除这个附件？删除后无法从共享页恢复。')"><button class="danger-button">删除附件</button></form>{{end}}
-        </div>
-        {{else}}<p class="muted">暂无附件</p>{{end}}
-      </div>
-
-      {{if hasPerm $.Permissions "share.manage"}}
-      <details class="inline-editor">
-        <summary class="secondary-button">完整编辑资料</summary>
-        <form method="post" action="/share/{{$archive.ID}}" class="form inner-form" data-success="共享资料已更新">
-          <input name="title" value="{{$archive.Title}}" placeholder="资料标题" maxlength="160" required>
-          <input name="category" value="{{$archive.Category}}" placeholder="资料分类" maxlength="80" required>
-          <textarea class="wide" name="content" placeholder="正文、说明、办事经验等">{{$archive.Content}}</textarea>
-          <button>保存全部修改</button>
-        </form>
-      </details>
-      <form method="post" action="/share/{{$archive.ID}}/attachments" enctype="multipart/form-data" class="form archive-upload">
-        <label class="wide upload"><strong>继续添加附件</strong><span>可一次选择多个文件；单个文件最大 50MB</span><input type="file" name="file" multiple required></label>
-        <button>上传附件</button>
-      </form>
-      {{end}}
-    </article>
+  <div class="archive-list archive-preview-grid">
+    {{range .Archives}}
+    <a class="card archive-preview-card" id="archive-{{.ID}}" href="/share-info?id={{.ID}}" aria-label="查看共享资料：{{.Title}}">
+      <div class="archive-preview-head"><span class="tag">{{.Category}}</span><span class="muted">{{humanDate .CreatedAt}}</span></div>
+      <h2>{{.Title}}</h2>
+      <p class="archive-preview-summary">{{if .Summary}}{{.Summary}}{{else}}（暂无正文）{{end}}</p>
+      <div class="archive-preview-meta"><span>发布人：<strong>{{.CreatorName}}</strong></span><span>附件 {{.AttachmentCount}} 个</span></div>
+    </a>
     {{else}}<section class="card"><p class="muted">暂无共享资料。</p></section>{{end}}
   </div>
 </main>

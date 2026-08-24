@@ -4,7 +4,7 @@
 <body>{{template "nav" .}}
 <main class="wrap">
   <h1>家族事务管理</h1>
-  {{if hasPerm .Permissions "matters.manage"}}
+  {{if hasPerm .Permissions "matters.manage_self"}}
   <section class="card">
     <h2>新建事务</h2>
     <form method="post" action="/matters" class="form">
@@ -28,13 +28,13 @@
         <div class="section-head">
           <div>
             <h2>{{$matter.Title}} <span class="tag">{{$matter.Status}}</span></h2>
-            <p class="muted">{{$matter.Type}}{{if $matter.ParentTitle}} · 父事务：{{$matter.ParentTitle}}{{end}}{{if $matter.OwnerName}} · 负责人：{{$matter.OwnerName}}{{end}}</p>
+            <p class="muted">{{$matter.Type}}{{if $matter.ParentTitle}} · 父事务：{{$matter.ParentTitle}}{{end}}{{if $matter.OwnerName}} · 负责人：{{$matter.OwnerName}}{{end}} · 创建人：{{$matter.CreatorName}}</p>
           </div>
           <div class="money">关联公共支出 ¥{{money $matter.ExpenseCent}}</div>
         </div>
         {{if or $matter.StartDate $matter.DueDate}}<p class="muted">日期：{{$matter.StartDate}}{{if $matter.DueDate}} → {{$matter.DueDate}}{{end}}</p>{{end}}
         <p class="pre-wrap">{{$matter.Description}}</p>
-        {{if hasPerm $.Permissions "matters.manage"}}
+        {{if canManageCreated $.Permissions $.CurrentMember.ID $matter.CreatedBy "matters"}}
         <details class="inline-editor">
           <summary class="secondary-button">完整编辑事务</summary>
           <form method="post" action="/matters/{{$matter.ID}}" class="form inner-form" data-success="事务已更新">

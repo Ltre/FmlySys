@@ -202,6 +202,41 @@ details > summary::-webkit-details-marker { display: none; }
 .archive-attachments { display: grid; gap: 7px; margin: 12px 0; }
 .archive-attachment-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 9px; border: 1px solid #e5e8ec; border-radius: 8px; }
 .archive-attachment-item form { flex: 0 0 auto; }
+.archive-preview-grid { grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 420px)); align-items: start; }
+.archive-preview-card {
+  aspect-ratio: 16 / 9;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+.archive-preview-card:hover, .archive-preview-card:focus-visible { border-color: #8ea9c8; box-shadow: 0 9px 22px rgba(30, 55, 83, .12); transform: translateY(-2px); outline: none; }
+.archive-preview-head, .archive-preview-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.archive-preview-card h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.archive-preview-summary { flex: 1 1 auto; min-height: 0; margin: 7px 0; overflow: hidden; color: #434a54; }
+.archive-preview-meta { margin-top: auto; font-size: 13px; color: #73777f; }
+.share-full-content { margin-top: 16px; line-height: 1.75; overflow-wrap: anywhere; }
+.share-edit-panel { flex: 0 1 680px; }
+.share-edit-panel[open] { width: min(680px, 100%); }
+.share-edit-panel .inner-form { margin-top: 10px; }
+
+.medication-wrap { max-width: 1120px; }
+.medication-date-filter { grid-template-columns: minmax(190px, 280px) auto; align-items: end; }
+.medication-stats { grid-template-columns: repeat(5, minmax(130px, 1fr)); }
+.medication-plan-create { margin: 18px 0; }
+.medication-plan-create .inner-form { margin-top: 12px; }
+.medication-plan-list { display: grid; gap: 14px; }
+.medication-plan-card { border-left: 5px solid #9aa2ad; }
+.medication-plan-card.is-taken { border-left-color: #2e8b57; }
+.medication-plan-card.is-missed { border-left-color: #c33d32; }
+.medication-status-taken { color: #176b3c; background: #e7f7ee; }
+.medication-status-missed { color: #9f2822; background: #fdecea; }
+.medication-record-form { grid-template-columns: minmax(150px, .5fr) minmax(220px, 1fr) auto; align-items: end; margin-top: 12px; }
+.medication-end-form { margin-top: 9px; }
 
 .floating-actions {
   position: fixed;
@@ -348,6 +383,14 @@ details > summary::-webkit-details-marker { display: none; }
   .passkey-admin-item form, .passkey-admin-item button { width: 100%; }
   .archive-attachment-item { display: grid; grid-template-columns: 1fr; }
   .archive-attachment-item form, .archive-attachment-item button { width: 100%; }
+  .archive-preview-grid { grid-template-columns: 1fr; }
+  .archive-preview-card { aspect-ratio: 16 / 9; }
+  .archive-preview-meta { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .share-edit-panel { width: 100%; }
+  .medication-date-filter, .medication-record-form { grid-template-columns: 1fr; }
+  .medication-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .medication-stats .card:last-child { grid-column: 1 / -1; }
+  .medication-end-form button { width: 100%; }
   .floating-actions { right: 14px; bottom: 16px; }
 }
 

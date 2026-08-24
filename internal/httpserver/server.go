@@ -66,6 +66,10 @@ type view struct {
 	ExpenseRefunds    []store.Reimbursement
 	Matters           []store.Matter
 	Archives          []store.Archive
+	Archive           store.Archive
+	MedicationDate    string
+	MedicationPlans   []store.MedicationPlan
+	MedicationSummary store.MedicationSummary
 	AdminQuickNotes   []store.AdminQuickMoneyNote
 	PendingJoins      []store.JoinRequest
 	JoinRequest       store.JoinRequest
@@ -98,7 +102,8 @@ func New(pm *partition.Manager, st *store.Store, admin *adminauth.Service, cfg c
 		"memberHasPerm": func(all map[int64]map[string]bool, id int64, key string) bool {
 			return all[id] != nil && all[id][key]
 		},
-		"defaultPerm": store.IsDefaultPermission,
+		"canManageCreated": store.CanManageCreatedRecord,
+		"defaultPerm":      store.IsDefaultPermission,
 	}
 	t, err := template.New("").Funcs(funcs).ParseFS(webassets.FS, "templates/*.html")
 	if err != nil {
@@ -157,15 +162,20 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /evidence/{id}", s.memberOrAdmin("assets.view", s.evidence))
 
 	s.mux.HandleFunc("GET /matters", s.member("matters.view", s.matters))
-	s.mux.HandleFunc("POST /matters", s.member("matters.manage", s.createMatter))
-	s.mux.HandleFunc("POST /matters/{id}", s.member("matters.manage", s.updateMatter))
-	s.mux.HandleFunc("POST /matters/{id}/status", s.member("matters.manage", s.setMatterStatus))
+	s.mux.HandleFunc("POST /matters", s.member("matters.manage_self", s.createMatter))
+	s.mux.HandleFunc("POST /matters/{id}", s.member("matters.view", s.updateMatter))
+	s.mux.HandleFunc("POST /matters/{id}/status", s.member("matters.view", s.setMatterStatus))
 	s.mux.HandleFunc("GET /share", s.member("share.view", s.share))
-	s.mux.HandleFunc("POST /share", s.member("share.manage", s.createArchive))
-	s.mux.HandleFunc("POST /share/{id}", s.member("share.manage", s.updateArchive))
-	s.mux.HandleFunc("POST /share/{id}/attachments", s.member("share.manage", s.uploadArchive))
-	s.mux.HandleFunc("POST /share/{id}/attachments/{attachmentID}/delete", s.member("share.manage", s.deleteArchiveAttachment))
+	s.mux.HandleFunc("GET /share-info", s.member("share.view", s.shareInfo))
+	s.mux.HandleFunc("POST /share", s.member("share.manage_self", s.createArchive))
+	s.mux.HandleFunc("POST /share/{id}", s.member("share.view", s.updateArchive))
+	s.mux.HandleFunc("POST /share/{id}/attachments", s.member("share.view", s.uploadArchive))
+	s.mux.HandleFunc("POST /share/{id}/attachments/{attachmentID}/delete", s.member("share.view", s.deleteArchiveAttachment))
 	s.mux.HandleFunc("GET /files/{id}", s.member("share.view", s.file))
+	s.mux.HandleFunc("GET /medication", s.member("medication.view", s.medication))
+	s.mux.HandleFunc("POST /medication/plans", s.member("medication.manage", s.createMedicationPlan))
+	s.mux.HandleFunc("POST /medication/plans/{id}/records", s.member("medication.manage", s.recordMedicationIntake))
+	s.mux.HandleFunc("POST /medication/plans/{id}/end", s.member("medication.manage", s.endMedicationPlan))
 
 	// Authenticated administrator business console.
 	s.mux.HandleFunc("GET /admin", s.adminOnly(s.admin))
@@ -284,6 +294,15 @@ func currentPermissions(r *http.Request) map[string]bool {
 func currentAdmin(r *http.Request) adminauth.Session {
 	a, _ := r.Context().Value(adminContextKey).(adminauth.Session)
 	return a
+}
+
+func requireCreatedRecordPermission(w http.ResponseWriter, r *http.Request, creatorID int64, domain string) bool {
+	member := currentMember(r)
+	if store.CanManageCreatedRecord(currentPermissions(r), member.ID, creatorID, domain) {
+		return true
+	}
+	http.Error(w, "你没有管理该成员所创建内容的权限", http.StatusForbidden)
+	return false
 }
 
 func (s *Server) businessActor(r *http.Request) int64 {
@@ -756,6 +775,48 @@ func (s *Server) share(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "share.html", v)
 }
 
+func (s *Server) shareInfo(w http.ResponseWriter, r *http.Request) {
+	v := s.base("共享资料详情")
+	v.CurrentMember = currentMember(r)
+	v.Permissions = currentPermissions(r)
+	archive, err := s.Store.FamilyArchiveByID(r.Context(), parseID(r.URL.Query().Get("id")))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	v.Archive = archive
+	s.render(w, "share-info.html", v)
+}
+
+func (s *Server) medication(w http.ResponseWriter, r *http.Request) {
+	v := s.base("老大药物服用管理")
+	v.CurrentMember = currentMember(r)
+	v.Permissions = currentPermissions(r)
+	v.MedicationDate = strings.TrimSpace(r.URL.Query().Get("date"))
+	if v.MedicationDate == "" {
+		v.MedicationDate = time.Now().Format("2006-01-02")
+	}
+	var err error
+	v.MedicationPlans, err = s.Store.MedicationPlansForDate(r.Context(), v.MedicationDate)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	v.MedicationSummary, err = s.Store.MedicationSummaryThrough(r.Context(), v.MedicationDate)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if v.Permissions["medication.manage"] {
+		v.Members, err = s.familyMembers(r.Context())
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
+	s.render(w, "medication.html", v)
+}
+
 func parseMultipart(r *http.Request) ([]*multipart.FileHeader, error) {
 	if err := r.ParseMultipartForm(220 << 20); err != nil {
 		return nil, err
@@ -1020,11 +1081,20 @@ func matterInputFromRequest(r *http.Request) store.MatterInput {
 }
 
 func (s *Server) updateMatter(w http.ResponseWriter, r *http.Request) {
+	matterID := parseID(r.PathValue("id"))
+	creatorID, err := s.Store.MatterCreatorID(r.Context(), matterID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if !requireCreatedRecordPermission(w, r, creatorID, "matters") {
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	if err := s.Store.UpdateMatter(r.Context(), currentMember(r).ID, parseID(r.PathValue("id")), matterInputFromRequest(r)); err != nil {
+	if err := s.Store.UpdateMatter(r.Context(), currentMember(r).ID, matterID, matterInputFromRequest(r)); err != nil {
 		s.fail(w, r, err)
 		return
 	}
@@ -1032,11 +1102,20 @@ func (s *Server) updateMatter(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) setMatterStatus(w http.ResponseWriter, r *http.Request) {
+	matterID := parseID(r.PathValue("id"))
+	creatorID, err := s.Store.MatterCreatorID(r.Context(), matterID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if !requireCreatedRecordPermission(w, r, creatorID, "matters") {
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	if err := s.Store.SetMatterStatus(r.Context(), currentMember(r).ID, parseID(r.PathValue("id")), r.FormValue("status")); err != nil {
+	if err := s.Store.SetMatterStatus(r.Context(), currentMember(r).ID, matterID, r.FormValue("status")); err != nil {
 		s.fail(w, r, err)
 		return
 	}
@@ -1057,18 +1136,36 @@ func (s *Server) createArchive(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateArchive(w http.ResponseWriter, r *http.Request) {
+	archiveID := parseID(r.PathValue("id"))
+	creatorID, err := s.Store.FamilyArchiveCreatorID(r.Context(), archiveID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if !requireCreatedRecordPermission(w, r, creatorID, "share") {
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	if err := s.Store.UpdateFamilyArchive(r.Context(), currentMember(r).ID, parseID(r.PathValue("id")), r.FormValue("title"), r.FormValue("category"), r.FormValue("content")); err != nil {
+	if err := s.Store.UpdateFamilyArchive(r.Context(), currentMember(r).ID, archiveID, r.FormValue("title"), r.FormValue("category"), r.FormValue("content")); err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	redirect(w, r, "/share#archive-"+r.PathValue("id"))
+	redirect(w, r, "/share-info?id="+strconv.FormatInt(archiveID, 10)+"#archive-detail")
 }
 
 func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
+	archiveID := parseID(r.PathValue("id"))
+	creatorID, err := s.Store.FamilyArchiveCreatorID(r.Context(), archiveID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if !requireCreatedRecordPermission(w, r, creatorID, "share") {
+		return
+	}
 	if err := r.ParseMultipartForm(220 << 20); err != nil {
 		s.fail(w, r, err)
 		return
@@ -1079,22 +1176,72 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, header := range file {
-		if err := s.Store.SaveArchiveAttachment(r.Context(), currentMember(r).ID, parseID(r.PathValue("id")), filepath.Join(s.PM.ActiveDir, "uploads"), header); err != nil {
+		if err := s.Store.SaveArchiveAttachment(r.Context(), currentMember(r).ID, archiveID, filepath.Join(s.PM.ActiveDir, "uploads"), header); err != nil {
 			s.fail(w, r, err)
 			return
 		}
 	}
-	redirect(w, r, "/share")
+	redirect(w, r, "/share-info?id="+strconv.FormatInt(archiveID, 10)+"#attachments")
 }
 
 func (s *Server) deleteArchiveAttachment(w http.ResponseWriter, r *http.Request) {
 	archiveID := parseID(r.PathValue("id"))
+	creatorID, err := s.Store.FamilyArchiveCreatorID(r.Context(), archiveID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if !requireCreatedRecordPermission(w, r, creatorID, "share") {
+		return
+	}
 	attachmentID := parseID(r.PathValue("attachmentID"))
 	if err := s.Store.DeleteFamilyArchiveAttachment(r.Context(), currentMember(r).ID, archiveID, attachmentID, filepath.Join(s.PM.ActiveDir, "uploads")); err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	redirect(w, r, "/share#archive-"+r.PathValue("id"))
+	redirect(w, r, "/share-info?id="+strconv.FormatInt(archiveID, 10)+"#attachments")
+}
+
+func (s *Server) createMedicationPlan(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if err := s.Store.CreateMedicationPlan(
+		r.Context(), currentMember(r).ID, parseID(r.FormValue("patient_member_id")),
+		r.FormValue("medicine_name"), r.FormValue("dosage"), r.FormValue("scheduled_time"),
+		r.FormValue("instructions"), r.FormValue("start_date"),
+	); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, "/medication")
+}
+
+func (s *Server) recordMedicationIntake(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	date := r.FormValue("scheduled_date")
+	if err := s.Store.RecordMedicationIntake(r.Context(), currentMember(r).ID, parseID(r.PathValue("id")), date, r.FormValue("status"), r.FormValue("note")); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, "/medication?date="+date+"#medication-plan-"+r.PathValue("id"))
+}
+
+func (s *Server) endMedicationPlan(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	date := r.FormValue("end_date")
+	if err := s.Store.EndMedicationPlan(r.Context(), currentMember(r).ID, parseID(r.PathValue("id")), date); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, "/medication?date="+date)
 }
 
 func (s *Server) file(w http.ResponseWriter, r *http.Request) {

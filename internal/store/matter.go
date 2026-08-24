@@ -177,8 +177,25 @@ func (s *Store) SetMatterStatus(ctx context.Context, actor, id int64, status str
 	return tx.Commit()
 }
 
+func (s *Store) MatterCreatorID(ctx context.Context, id int64) (int64, error) {
+	var creatorID int64
+	if err := s.DB.QueryRowContext(ctx, `SELECT created_by FROM matters WHERE id=?`, id).Scan(&creatorID); err != nil {
+		return 0, err
+	}
+	return creatorID, nil
+}
+
 func (s *Store) Matters(ctx context.Context) ([]Matter, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,m.parent_id,COALESCE(p.title,''),m.title,m.matter_type,m.description,m.status,COALESCE(m.start_date,''),COALESCE(m.due_date,''),COALESCE(m.owner_member_id,0),COALESCE(o.name,''),COALESCE((SELECT SUM(e.amount_cent) FROM public_expenses e WHERE e.matter_id=m.id AND e.status='active'),0) FROM matters m LEFT JOIN matters p ON p.id=m.parent_id LEFT JOIN members o ON o.id=m.owner_member_id ORDER BY m.status='done',m.due_date IS NULL,m.due_date,m.id DESC`)
+	rows, err := s.DB.QueryContext(ctx, `
+SELECT m.id,m.parent_id,COALESCE(p.title,''),m.title,m.matter_type,m.description,m.status,
+       COALESCE(m.start_date,''),COALESCE(m.due_date,''),COALESCE(m.owner_member_id,0),COALESCE(o.name,''),
+       m.created_by,COALESCE(c.name,''),
+       COALESCE((SELECT SUM(e.amount_cent) FROM public_expenses e WHERE e.matter_id=m.id AND e.status='active'),0)
+FROM matters m
+LEFT JOIN matters p ON p.id=m.parent_id
+LEFT JOIN members o ON o.id=m.owner_member_id
+LEFT JOIN members c ON c.id=m.created_by
+ORDER BY m.status='done',m.due_date IS NULL,m.due_date,m.id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +204,7 @@ func (s *Store) Matters(ctx context.Context) ([]Matter, error) {
 	for rows.Next() {
 		var v Matter
 		var parent *int64
-		if err := rows.Scan(&v.ID, &parent, &v.ParentTitle, &v.Title, &v.Type, &v.Description, &v.Status, &v.StartDate, &v.DueDate, &v.OwnerMemberID, &v.OwnerName, &v.ExpenseCent); err != nil {
+		if err := rows.Scan(&v.ID, &parent, &v.ParentTitle, &v.Title, &v.Type, &v.Description, &v.Status, &v.StartDate, &v.DueDate, &v.OwnerMemberID, &v.OwnerName, &v.CreatedBy, &v.CreatorName, &v.ExpenseCent); err != nil {
 			return nil, err
 		}
 		v.ParentID = parent

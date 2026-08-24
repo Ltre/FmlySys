@@ -19,6 +19,7 @@
   body { width: 100%; overflow-x: hidden; }
   .wrap { width: 100%; max-width: none; }
   .card { width: 100%; overflow: visible; }
+  .archive-preview-card { overflow: hidden; }
 
   /* Keep touch controls easy to hit even in nested/administrative forms. */
   input:not([type="checkbox"]):not([type="radio"]),
