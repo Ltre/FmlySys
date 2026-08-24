@@ -3005,6 +3005,50 @@
 
 	2、在后台的家族成员信息保存功能中，点击"保存成员信息"，按钮文字一直显示"提交中..."，实际接口已经成功调用。刷新页面，才看到已经生效。
 
+	
+	请在分支 dev-2608C-step1 修改，不要提交，不要暂存。
+	推理过程及开发日志保存到 doc/devlog/devlog-2608C-features.md。
+	完成后给我git log的title和description，以中文为主。
+
+	
+答：
+
+	已修复，覆盖：
+
+	- 前台家族事务完整编辑。
+	- 前台家族信息共享完整编辑。
+	- 后台成员信息保存。
+
+	根因是同页锚点跳转没有刷新页面。现在成功后会保留目标锚点并强制 reload，按钮不再停留在“提交中…”，最新数据也会立即显示。
+
+	验证通过：
+
+	- `go test ./...`
+	- `node --check web/static/app.js`
+	- 同页 reload、跨页 assign 行为级模拟
+	- 任务文件 `git diff --check`
+
+	开发记录已追加至 [devlog-2608C-features.md](E:/Workspaces/github/Ltre/FmlySys/doc/devlog/devlog-2608C-features.md)。
+
+	未暂存、未提交，当前 HEAD 仍为 `2a5685f`。`doc/prompt/prompt-2608C.md` 是当前需求文本已有改动，本轮未修改；本轮代码改动仅涉及 [app.js](E:/Workspaces/github/Ltre/FmlySys/web/static/app.js) 和 devlog。
+
+	Git log 建议：
+
+	**Title**
+
+	```text
+	fix: 修复通用编辑表单提交成功后未刷新
+	```
+
+	**Description**
+
+	```text
+	- 修复同页锚点跳转不会重新加载页面的问题
+	- 家族事务和信息共享编辑成功后立即刷新并显示最新数据
+	- 后台成员信息保存成功后恢复按钮状态并刷新成员资料
+	- 保留成功提示、服务端错误展示和记录锚点定位
+	- 补充同页刷新与跨页跳转行为验证
+	```
 
 	
 

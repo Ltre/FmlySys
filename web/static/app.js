@@ -204,6 +204,19 @@
     return path !== '/logout' && path !== '/admin/logout';
   }
 
+  function navigateAfterSuccess(target) {
+    const current = new URL(window.location.href);
+    const sameDocument = target.origin === current.origin &&
+      target.pathname === current.pathname &&
+      target.search === current.search;
+    if (sameDocument) {
+      window.history.replaceState(null, '', target.href);
+      window.location.reload();
+      return;
+    }
+    window.location.assign(target.href);
+  }
+
   function enhanceAsyncForms() {
     document.querySelectorAll('form').forEach((form) => {
       if (!shouldEnhanceForm(form) || form.dataset.asyncEnhanced === '1') return;
@@ -254,7 +267,7 @@
           if (form.dataset.returnAnchor && target.origin === window.location.origin) {
             target.hash = form.dataset.returnAnchor;
           }
-          window.location.assign(target.href);
+          navigateAfterSuccess(target);
         } catch (error) {
           setSubmitBusy(form, submitter, false);
           setFormFeedback(form, error instanceof Error ? error.message : '提交失败，请检查输入后重试。', 'error');

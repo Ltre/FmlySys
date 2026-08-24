@@ -254,3 +254,55 @@ node --check web/static/floating-actions.js
 ```
 
 因此，第 32.6 节关于“网络环境下无法真实运行 Go 测试”的时点性说明，已被本节的实际全量测试结果取代。本轮按要求不暂存、不提交。
+
+## 34. 修复通用编辑表单成功后停留在“提交中”
+
+日期：2026-08-24
+
+### 34.1 现象与影响范围
+
+以下表单的服务端写入已经成功，但浏览器页面没有重新加载，导致按钮仍显示“提交中…”，旧 DOM 也没有显示更新后的数据：
+
+- 前台事务完整编辑：`POST /matters/{id}`；
+- 前台信息共享完整编辑：`POST /share/{id}`；
+- 后台成员信息保存：`POST /admin/members/{id}/edit`。
+
+### 34.2 根因
+
+三个 handler 在成功后都会回到原页面的指定记录锚点，例如：
+
+```text
+/matters#matter-12
+/share#archive-8
+/admin/authorities#member-3
+```
+
+`WithEnhancedFormResponses` 会正确把 303 跳转转换为 JSON 中的 `redirect`。问题在客户端 `app.js`：成功后直接调用 `window.location.assign(target.href)`。当目标与当前页面的 origin、pathname 和 search 都相同，只有 hash 不同时，浏览器仅执行页内锚点跳转，不会再向服务端请求 HTML。因为当前 JavaScript 执行上下文没有被销毁，表单的 busy 状态也一直保留。
+
+### 34.3 修复方案
+
+在通用异步表单逻辑中新增 `navigateAfterSuccess(target)`：
+
+```text
+目标 origin/pathname/search 与当前页相同
+→ history.replaceState 保留服务端返回的记录锚点
+→ location.reload 强制重新请求页面
+
+目标是其他页面或其他查询条件
+→ 继续使用 location.assign
+```
+
+这个修复放在通用层，因此事务、共享资料和成员信息表单自动获得一致行为。没有把这些表单降级为非异步提交，因而仍保留现有的服务端校验错误就地展示、成功 flash 提示和锚点定位。资金表单继续由 `asset-workflow.js` 的专用提交与新流水定位逻辑处理，不受本轮影响。
+
+### 34.4 验证
+
+实际执行并通过：
+
+```text
+node --check web/static/app.js
+Node 行为级模拟：同页锚点执行 replaceState + reload，跨页执行 assign
+go test ./...
+git diff --check -- web/static/app.js
+```
+
+本轮按要求不暂存、不提交。
