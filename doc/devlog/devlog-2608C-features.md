@@ -74,3 +74,66 @@ PWA 为首选通道。系统随机生成并持久化 P-256 VAPID 私钥；浏览
 6. 新增 Go template 使用 `html/template` 解析通过；`medication-push.js`、`medication-sw.js` 使用 `node --check` 通过。
 
 仓库同时加入相应回归测试。由于完整依赖环境限制，首次在实际开发/部署机器拉取本提交后仍应执行 `go test ./... -count=1` 作为最终完整编译级验证。
+
+## 37. 修复服药页公共导航模板崩溃并恢复源码规范排版
+
+日期：2026-08-26
+
+### 37.1 `/medication` 运行时模板错误
+
+实际浏览器访问 `/medication` 时出现：
+
+```text
+template: dashboard.html:3:124: executing "nav" at <.AdminUsername>:
+can't evaluate field AdminUsername in type httpserver.medicationPageView
+```
+
+根因不是服药数据查询，而是共享 `nav` 模板需要读取 `.AdminUsername` 来区分前后台导航。原来的通用 `view` 包含该字段，但第 36 节新增的四种服药页面专用 view 没有声明它。Go `html/template` 对不存在的结构体字段会直接返回执行错误，并不会把它当成空字符串，所以页面在进入前台导航分支之前就已经 500。
+
+本轮统一给以下四种 view 补上 `AdminUsername string`，前台保持零值即可：
+
+- `medicationPageView`；
+- `medicationPlansView`；
+- `medicationPlanDetailView`；
+- `medicationCheckinView`。
+
+因此 `/medication`、`/medication/plans`、计划详情和服药签到页都具备共享导航模板要求的同一字段契约，而不是只针对当前报错页面做一次性补丁。
+
+同时新增 `TestMedicationViewsRenderSharedNavigation`：直接解析仓库真实的 `dashboard.html`，并分别使用上述四种 view 执行真实 `nav` 模板。这个测试专门防止以后新增/调整服药 view 时再次漏掉共享导航所需字段。
+
+### 37.2 恢复 Go 源码可维护格式
+
+第 36 节通过 Git 对象接口写入代码时，为规避单次传输长度限制，一批新增文件被临时压成了大量分号和单行函数。虽然 Go 语法允许，但严重降低可读性，不应该作为仓库最终源码格式。
+
+本轮对上一提交中实际被压缩的 Go 文件重新使用真实 `gofmt` 规范化，并按职责增加必要空行和分段，包括：
+
+- `cmd/fmlysys/main.go`：配置加载、分区初始化、成员/管理员初始化、提醒循环、中间件链、HTTP Server、信号退出分别成段；
+- `internal/httpserver` 下新增的审计 console、超级审计 middleware、服药 view/routes/actions/push handlers；
+- `internal/store` 下新增的超级审计、服药计划 CRUD/查询、签到验证、通知投递；
+- 上一轮中同样存在密集写法的审计/服药回归测试。
+
+已经正常排版的大文件（例如远控信封加密和 Web Push 核心实现）不做纯噪声重排，避免无意义扩大 diff。
+
+### 37.3 HTML、CSS 与 JavaScript 排版
+
+`dashboard.html` 和 `medication-enhancements.html` 原先几乎一个 template 占一整行。本轮在不改变 Go template 控制逻辑的前提下，按 HTML 层级进行结构化缩进：`html/head/body/main/section/form/table` 等元素分层，`if/range/else/end` 与其控制的 DOM 对齐。
+
+同时把：
+
+- `medication-v2.css` 从单行压缩样式恢复为 selector/property 分行；
+- `medication-push.js` 恢复函数、异常分支、Fetch 参数和事件回调的正常缩进；
+- `medication-sw.js` 恢复 Push/notificationclick 事件、notification options 和 client 遍历的正常缩进。
+
+这些调整只恢复源代码可维护性，不引入前端构建期 minify，也不改变浏览器最终行为。
+
+### 37.4 验证
+
+本轮实际执行：
+
+1. 所有本轮整理的 Go 文件执行 `gofmt`，同时利用 `gofmt` 的解析过程确认没有因展开代码引入 Go 语法错误；
+2. `dashboard.html` 与 `medication-enhancements.html` 使用 Go `html/template` 和现有模板函数集合实际解析通过；
+3. 使用前台 view 字段集合实际执行共享 `nav` 模板，确认 `.AdminUsername` 不再产生字段缺失错误；
+4. `medication-push.js`、`medication-sw.js` 分别执行 `node --check` 通过；
+5. 新增真实 `nav` 回归测试，覆盖服药首页、扁平计划列表、计划详情、签到四种 view。
+
+当前执行容器仍无法直接 clone GitHub 完整仓库，因此不会把未实际运行的 `go test ./...` 描述成通过。提交后应由本地完整仓库继续执行 `go test ./... -count=1`；本轮已经把导致实际页面 500 的模板字段契约纳入自动回归测试。
