@@ -1,0 +1,73 @@
+.medication-closed-alert {
+  margin: 1rem 0;
+  padding: 0.9rem 1rem;
+  border: 2px solid #b42318;
+  border-radius: 0.75rem;
+  background: #fff1f0;
+  color: #8a1c13;
+  font-weight: 700;
+}
+
+.medication-closed-alert.compact {
+  margin: 0.65rem 0;
+  padding: 0.6rem 0.75rem;
+  font-weight: 600;
+}
+
+.medication-plan-disabled {
+  opacity: 0.72;
+}
+
+.disabled-button,
+button:disabled,
+select:disabled,
+input:disabled {
+  cursor: not-allowed !important;
+}
+
+button:disabled,
+.disabled-button {
+  opacity: 0.52;
+  filter: grayscale(0.8);
+}
+
+.checkin-actions-v3 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.checkin-actions-v3 form {
+  margin: 0;
+}
+
+.checkin-actions-v3 button {
+  width: 100%;
+  min-height: 5.5rem;
+  padding: 1rem 1.4rem;
+  border: 0;
+  border-radius: 1rem;
+  color: #fff;
+  font-size: clamp(1.25rem, 4vw, 1.8rem);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.checkin-taken {
+  background: #16803c;
+}
+
+.checkin-later {
+  background: #c62828;
+}
+
+.checkin-actions-v3 button:disabled {
+  background: #8b949e;
+}
+
+@media (max-width: 640px) {
+  .checkin-actions-v3 {
+    grid-template-columns: 1fr;
+  }
+}

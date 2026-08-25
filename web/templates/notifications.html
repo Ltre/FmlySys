@@ -1,0 +1,72 @@
+{{define "notifications.html"}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  {{template "nav" .}}
+  <main class="wrap">
+    <div class="section-head">
+      <div>
+        <h1>通知中心</h1>
+        <p class="muted">这里只保留需要后续查看的通知。服药自动定时提醒不会重复写入通知中心。</p>
+      </div>
+    </div>
+    <div class="grid">
+      {{range .Notifications}}
+      <a class="card" href="/notifications/{{.ID}}" style="text-decoration:none;color:inherit">
+        <div class="section-head">
+          <strong>{{if .ReadAt}}{{.Title}}{{else}}● {{.Title}}{{end}}</strong>
+          <span class="tag">{{if eq .Kind "medication_manual"}}手动服药提醒{{else}}服药反馈{{end}}</span>
+        </div>
+        <p>{{.Body}}</p>
+        <p class="muted"><time data-fmly-datetime="{{.CreatedAt}}">{{.CreatedAt}}</time>{{if .ActorName}} · 来自 {{.ActorName}}{{end}}</p>
+      </a>
+      {{else}}
+      <section class="card"><p class="muted">当前没有通知。</p></section>
+      {{end}}
+    </div>
+  </main>
+</body>
+</html>
+{{end}}
+
+{{define "notification-detail.html"}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  {{template "nav" .}}
+  <main class="wrap">
+    <a href="/notifications">← 返回通知中心</a>
+    <section class="card" style="margin-top:1rem">
+      <div class="section-head">
+        <h1>{{.Notification.Title}}</h1>
+        <span class="tag">{{if eq .Notification.Kind "medication_manual"}}手动服药提醒{{else}}服药反馈{{end}}</span>
+      </div>
+      <p>{{.Notification.Body}}</p>
+      {{if .Notification.ActorName}}<p class="muted">发送/触发人：{{.Notification.ActorName}}</p>{{end}}
+      <p class="muted">时间：<time data-fmly-datetime="{{.Notification.CreatedAt}}">{{.Notification.CreatedAt}}</time></p>
+      {{if .Notification.Link}}
+      <div class="quick-actions">
+        <a class="secondary-button" href="{{.Notification.Link}}">打开对应服药签到页面</a>
+      </div>
+      <p class="muted">具体链接：<code>{{.Notification.Link}}</code></p>
+      {{end}}
+    </section>
+  </main>
+  <script>
+    fetch("/notifications/{{.Notification.ID}}/read", {method: "POST", credentials: "same-origin"}).catch(() => {});
+  </script>
+</body>
+</html>
+{{end}}

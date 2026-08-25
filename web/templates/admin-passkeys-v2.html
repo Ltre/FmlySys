@@ -1,0 +1,98 @@
+{{define "admin-passkeys-v2.html"}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <style>
+    .passkey-binding-grid { display:grid; gap:.65rem; }
+    .passkey-credential { border:1px solid #d0d7de; border-radius:.7rem; padding:.75rem; }
+    .passkey-credential .binding-line { display:flex; flex-wrap:wrap; gap:.6rem; align-items:center; margin-top:.55rem; }
+    .passkey-credential form { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; margin:0; }
+  </style>
+</head>
+<body>
+  {{template "nav" .}}
+  <main class="wrap">
+    <div class="section-head">
+      <div>
+        <h1>Passkey 登录身份管理</h1>
+        <p class="muted">身份级关联是默认值；每一个 Passkey 还可以单独覆盖关联到另一个成员，不需要删除后重新注册。</p>
+      </div>
+    </div>
+
+    {{range .Identities}}{{$identity := .}}
+    <section class="card">
+      <div class="section-head">
+        <div>
+          <h2>#{{.ID}} · {{.Phone}}</h2>
+          <p class="muted">{{.ProfileRemark}}</p>
+        </div>
+        <form method="post" action="/admin/passkeys/{{.ID}}/bind" class="form compact-form">
+          <label>
+            身份默认成员
+            <select name="member_id">
+              <option value="0">未关联成员</option>
+              {{range $.Members}}
+              <option value="{{.ID}}" {{if eq .ID $identity.DefaultMemberID}}selected{{end}}>#{{.ID}} {{.Name}} {{.Relation}}</option>
+              {{end}}
+            </select>
+          </label>
+          <button>保存身份默认关联</button>
+        </form>
+      </div>
+
+      {{if .DefaultMemberID}}
+      <p>当前身份默认进入：<strong>#{{.DefaultMemberID}} {{.DefaultMemberName}}</strong></p>
+      {{else}}
+      <p class="muted">当前身份没有默认成员；未单独覆盖的 Passkey 登录后保持游离态。</p>
+      {{end}}
+
+      <div class="passkey-binding-grid">
+        {{range .Credentials}}{{$credential := .}}
+        <article class="passkey-credential">
+          <div>
+            <strong>{{.Remark}}</strong>
+            <div class="muted"><code>{{.RPID}}</code> · Passkey #{{.ID}}</div>
+            <div class="muted">
+              创建 <time data-fmly-datetime="{{.CreatedAt}}">{{.CreatedAt}}</time>
+              {{if .LastUsedAt}} · 最近使用 <time data-fmly-datetime="{{.LastUsedAt}}">{{.LastUsedAt}}</time>{{end}}
+            </div>
+          </div>
+          <div class="binding-line">
+            {{if .OverrideMemberID}}
+            <span>单独覆盖：<strong>#{{.OverrideMemberID}} {{.OverrideMemberName}}</strong></span>
+            {{else}}
+            <span class="muted">未单独覆盖，继承身份默认关联</span>
+            {{end}}
+            <span>实际登录成员：{{if .EffectiveMemberID}}<strong>#{{.EffectiveMemberID}} {{.EffectiveMemberName}}</strong>{{else}}<strong>游离态</strong>{{end}}</span>
+          </div>
+          <div class="binding-line">
+            <form method="post" action="/admin/passkeys/credentials/{{.ID}}/bind">
+              <select name="member_id">
+                <option value="0" {{if eq .OverrideMemberID 0}}selected{{end}}>继承身份默认关联</option>
+                {{range $.Members}}
+                <option value="{{.ID}}" {{if eq .ID $credential.OverrideMemberID}}selected{{end}}>#{{.ID}} {{.Name}} {{.Relation}}</option>
+                {{end}}
+              </select>
+              <button>保存此 Passkey 关联</button>
+            </form>
+            <form method="post" action="/admin/passkeys/credentials/{{.ID}}/delete" data-no-async="1" onsubmit="return confirm('确认删除这个 Passkey？对应设备将不能再用它登录，但成员本身不会被删除。')">
+              <button class="danger-button">删除 Passkey</button>
+            </form>
+          </div>
+        </article>
+        {{else}}
+        <p class="muted">当前没有可用 Passkey。</p>
+        {{end}}
+      </div>
+    </section>
+    {{else}}
+    <section class="card"><p class="muted">当前没有 Passkey 登录身份。</p></section>
+    {{end}}
+  </main>
+</body>
+</html>
+{{end}}
