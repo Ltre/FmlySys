@@ -1,0 +1,16 @@
+(() => {
+  const button = document.querySelector('[data-enable-medication-push]');
+  const decodeKey = (value) => { const pad = '='.repeat((4 - value.length % 4) % 4); const raw = atob((value + pad).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(raw, c => c.charCodeAt(0)); };
+  async function enablePush() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('当前浏览器不支持 PWA Push');
+    const reg = await navigator.serviceWorker.register('/medication-sw.js', {scope: '/'});
+    const permission = await Notification.requestPermission(); if (permission !== 'granted') throw new Error('通知权限未允许');
+    const keyResp = await fetch('/medication/push/public-key', {credentials: 'same-origin'}); if (!keyResp.ok) throw new Error('无法取得 PWA 推送公钥');
+    const {public_key: publicKey} = await keyResp.json(); let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: decodeKey(publicKey)});
+    const save = await fetch('/medication/push/subscribe', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(sub)});
+    if (!save.ok) throw new Error(await save.text() || '保存 PWA 订阅失败'); return 'PWA 服药通知已启用';
+  }
+  if (button) button.addEventListener('click', async () => { button.disabled = true; const old = button.textContent; button.textContent = '正在启用…'; try { alert(await enablePush()); } catch (err) { alert(`启用失败：${err.message || err}`); } finally { button.disabled = false; button.textContent = old; } });
+  navigator.serviceWorker?.addEventListener('message', event => { if (event.data?.type !== 'fmlysys-medication-reminder' || !event.data.voice) return; if ('speechSynthesis' in window) { speechSynthesis.cancel(); const utter = new SpeechSynthesisUtterance(event.data.voice); utter.lang = 'zh-CN'; speechSynthesis.speak(utter); } });
+})();
