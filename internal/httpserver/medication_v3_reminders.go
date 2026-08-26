@@ -26,45 +26,94 @@ func (s *Server) dispatchMedicationReminderTargetV3(
 		"url":   targetURL,
 	})
 
-	key, keyErr := loadOrCreateMedicationVAPIDKey(s.Config.DataDir)
-	pwaSent := false
-	var pwaErrors []string
-	if keyErr == nil {
-		subs, err := s.Store.MedicationPushSubscriptions(ctx, plan.PatientMemberID)
+	dualDelivery := store.MedicationReminderRequiresBothChannels(stage)
+	pwaAlreadySent := false
+	termuxAlreadySent := false
+	if stage == "plus2h" {
+		var err error
+		pwaAlreadySent, err = s.Store.MedicationAutomaticChannelSentV3(ctx, plan.ID, date, stage, "pwa")
 		if err != nil {
-			pwaErrors = append(pwaErrors, err.Error())
-		} else {
-			for _, sub := range subs {
-				statusCode, sendErr := sendWebPush(ctx, key, sub.Endpoint, sub.P256DH, sub.Auth, payload)
-				if sendErr == nil {
-					pwaSent = true
-					_ = s.Store.RecordMedicationNotificationDelivery(ctx, plan.ID, date, stage, "pwa", "sent", sub.Endpoint)
-					continue
-				}
-				_ = s.Store.RecordMedicationNotificationDelivery(ctx, plan.ID, date, stage, "pwa", "failed", sendErr.Error())
-				pwaErrors = append(pwaErrors, sendErr.Error())
-				if statusCode == http.StatusNotFound || statusCode == http.StatusGone {
-					_ = s.Store.DeleteMedicationPushSubscription(ctx, sub.ID)
+			return fmt.Errorf("检查 PWA 投递状态失败: %w", err)
+		}
+		termuxAlreadySent, err = s.Store.MedicationAutomaticChannelSentV3(ctx, plan.ID, date, stage, "termux")
+		if err != nil {
+			return fmt.Errorf("检查 Termux 投递状态失败: %w", err)
+		}
+	}
+
+	pwaSent := pwaAlreadySent
+	var pwaErrors []string
+	if !pwaAlreadySent {
+		key, keyErr := loadOrCreateMedicationVAPIDKey(s.Config.DataDir)
+		if keyErr == nil {
+			subs, err := s.Store.MedicationPushSubscriptions(ctx, plan.PatientMemberID)
+			if err != nil {
+				pwaErrors = append(pwaErrors, err.Error())
+			} else {
+				for _, sub := range subs {
+					statusCode, sendErr := sendWebPush(ctx, key, sub.Endpoint, sub.P256DH, sub.Auth, payload)
+					if sendErr == nil {
+						pwaSent = true
+						_ = s.Store.RecordMedicationNotificationDelivery(ctx, plan.ID, date, stage, "pwa", "sent", sub.Endpoint)
+						continue
+					}
+					_ = s.Store.RecordMedicationNotificationDelivery(ctx, plan.ID, date, stage, "pwa", "failed", sendErr.Error())
+					pwaErrors = append(pwaErrors, sendErr.Error())
+					if statusCode == http.StatusNotFound || statusCode == http.StatusGone {
+						_ = s.Store.DeleteMedicationPushSubscription(ctx, sub.ID)
+					}
 				}
 			}
+		} else {
+			pwaErrors = append(pwaErrors, keyErr.Error())
 		}
-	} else {
-		pwaErrors = append(pwaErrors, keyErr.Error())
 	}
-	if pwaSent {
+
+	if !dualDelivery && pwaSent {
 		return nil
 	}
 
-	if err := sendTermuxMedicationNotification(s.Config.DataDir, title, body); err == nil {
-		_ = s.Store.RecordMedicationNotificationDelivery(ctx, plan.ID, date, stage, "termux", "sent", "FRP STCP SSH")
-		return nil
-	} else {
-		_ = s.Store.RecordMedicationNotificationDelivery(ctx, plan.ID, date, stage, "termux", "failed", err.Error())
-		if len(pwaErrors) == 0 {
-			return err
+	termuxSent := termuxAlreadySent
+	var termuxErr error
+	if !termuxAlreadySent {
+		termuxErr = sendTermuxMedicationNotification(s.Config.DataDir, title, body)
+		if termuxErr == nil {
+			termuxSent = true
+			_ = s.Store.RecordMedicationNotificationDelivery(ctx, plan.ID, date, stage, "termux", "sent", "FRP STCP SSH + termux-tts-speak")
+		} else {
+			_ = s.Store.RecordMedicationNotificationDelivery(ctx, plan.ID, date, stage, "termux", "failed", termuxErr.Error())
 		}
-		return fmt.Errorf("PWA 未成功投递（%s）；Termux 兜底也失败（%v）", strings.Join(pwaErrors, "; "), err)
 	}
+
+	if dualDelivery {
+		if pwaSent && termuxSent {
+			return nil
+		}
+		pwaReason := ""
+		if !pwaSent {
+			if len(pwaErrors) == 0 {
+				pwaReason = "没有可用 PWA 订阅"
+			} else {
+				pwaReason = strings.Join(pwaErrors, "; ")
+			}
+		}
+		switch {
+		case pwaSent && !termuxSent:
+			return fmt.Errorf("PWA 已成功投递，但 Termux 语音通知失败（%v）", termuxErr)
+		case !pwaSent && termuxSent:
+			return fmt.Errorf("Termux 语音通知已成功，但 PWA 未成功投递（%s）", pwaReason)
+		default:
+			return fmt.Errorf("PWA 未成功投递（%s）；Termux 语音通知也失败（%v）", pwaReason, termuxErr)
+		}
+	}
+
+	if termuxSent {
+		return nil
+	}
+	if len(pwaErrors) == 0 {
+		return termuxErr
+	}
+	return fmt.Errorf("PWA 未成功投递（%s）；Termux 兜底也失败（%v）", strings.Join(pwaErrors, "; "), termuxErr)
 }
 
 func (s *Server) dispatchAutomaticMedicationReminderV3(ctx context.Context, plan store.MedicationPlanV3, date, stage string) error {
@@ -110,8 +159,8 @@ func (s *Server) runMedicationReminderSweepV3(ctx context.Context, nowTime time.
 		if stage == "" {
 			continue
 		}
-		sent, err := s.Store.MedicationAutomaticStageSentV3(ctx, plan.ID, date, stage)
-		if err != nil || sent {
+		complete, err := s.Store.MedicationAutomaticStageCompleteV3(ctx, plan.ID, date, stage)
+		if err != nil || complete {
 			continue
 		}
 		retryAllowed, err := s.Store.MedicationAutomaticStageRetryAllowedV3(ctx, plan.ID, date, stage, nowTime)

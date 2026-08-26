@@ -115,3 +115,47 @@
 4. `timezone.js` 使用 `node --check`；
 5. 对 Passkey credential 覆盖成员 SQL、审计分页 SQL、服药 stage/timezone 判定做独立 SQLite/Go 夹具检查；
 6. 完整仓库依赖环境若仍无法联网解析 github.com，则不会把未执行的 `go test ./...` 描述为已通过；应在实际开发机继续执行全量测试。
+
+## 39. 手动提醒与 +2h 提醒改为 PWA + Termux 双通道主动发送
+
+日期：2026-08-27
+
+### 39.1 通知通道策略调整
+
+本轮只调整服药提醒的投递策略，不改变提醒时间点、通知中心入库范围、服药完成判定和既有 PWA/Termux 配置。
+
+新的规则为：
+
+- `manual`：有权限人员手动点击“提醒服药”时，PWA 与 Termux 语音通知都主动尝试发送，不再因为 PWA 已成功就跳过 Termux；
+- `plus2h`：超过计划时间 2 小时且仍未完成服药时，PWA 与 Termux 语音通知都必须尝试发送；
+- `scheduled`：维持原策略，PWA 成功即结束本次投递，仅在 PWA 不可用或全部失败时使用 Termux 兜底；
+- `plus1h`：同样维持 PWA 优先、Termux 兜底。
+
+Termux 通道继续使用已有 `sendTermuxMedicationNotification`，远端命令同时执行 `termux-notification` 与 `termux-tts-speak`，所以这里要求的 Termux 语音提醒并不是仅写一条系统通知。
+
+### 39.2 +2h 双通道完成判定与重试
+
+旧的自动阶段完成判定是“这个 stage 只要任意 channel 有一条 `sent` 就算完成”。这对于 scheduled/+1h 的兜底模式是正确的，但不符合 +2h 双通道要求：如果 PWA 成功而 Termux 临时失败，旧逻辑会把 plus2h 直接标成完成，从而永远不再补发 Termux。
+
+本轮新增按 channel 查询成功投递状态，并将自动阶段完成规则改为：
+
+- `plus2h` 必须同时存在 `pwa/sent` 和 `termux/sent` 才完成；
+- 其他自动阶段继续沿用“任一成功通道即可完成”。
+
+重试时会先检查 plus2h 两个通道各自是否已经成功。已经成功的通道不重复发送，只补发缺失的通道。例如 PWA 已成功、Termux 失败，则至少等待既有 1 分钟失败重试间隔后只重试 Termux，不会每分钟再次向用户发送同一条 PWA 通知。
+
+手动提醒没有自动重试循环；每次管理员主动点击提醒都视为一次新的手动提醒，并在该次操作中分别尝试 PWA 和 Termux。只有两个通道都成功时页面才按完整成功处理；其中一个失败时保留另一个已经成功的事实记录，并把未完全投递原因返回页面。
+
+### 39.3 数据结构与迁移
+
+本轮不需要新增 migration。000010 已将自动投递成功唯一约束定义为 `(plan_id, scheduled_date, stage, channel)` 且仅约束 `status='sent'`，天然允许 plus2h 分别保存一条 PWA 成功和一条 Termux 成功记录，也允许失败后针对缺失通道继续重试。
+
+### 39.4 验证
+
+本轮提交前完成：
+
+1. 修改后的 `medication_v3_reminders.go` 和新增 Store 策略文件执行 `gofmt`；
+2. 新增 `TestMedicationReminderRequiresBothChannels`，明确锁定 manual/plus2h 为双通道、scheduled/plus1h 为原兜底模式，测试在独立 Go 夹具中通过；
+3. 对自动阶段完成 SQL 做 SQLite 场景验证：scheduled 仅 PWA 成功即完成；plus2h 仅 PWA 或仅 Termux 成功均不完成；两者同时成功后才完成；
+4. 检查 plus2h 重试路径，确认已成功 channel 会被跳过，只补发尚未成功的 channel；
+5. 完整仓库 `go test ./...` 若当前执行环境仍无法解析 github.com，则不虚报为已执行通过，最终仍建议在实际开发机做全量测试。
