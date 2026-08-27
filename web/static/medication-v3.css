@@ -39,6 +39,19 @@ button:disabled,
   margin-bottom: 0.75rem;
 }
 
+.medication-month-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.medication-month-controls input[type="month"] {
+  min-height: 2.45rem;
+  padding: 0.4rem 0.65rem;
+}
+
 .medication-month-legend {
   display: flex;
   flex-wrap: wrap;
@@ -163,6 +176,20 @@ button:disabled,
 }
 
 @media (max-width: 640px) {
+  .medication-month-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .medication-month-controls .secondary-button {
+    flex: 1 1 auto;
+  }
+
+  .medication-month-controls input[type="month"] {
+    flex: 1 1 9rem;
+    min-width: 0;
+  }
+
   .medication-month-grid {
     gap: 0.25rem;
   }

@@ -96,6 +96,16 @@
   }
 
   let currentMonthOverview = null;
+  let monthOverviewRequestSequence = 0;
+
+  function shiftMonth(monthValue, delta) {
+    const [year, month] = monthValue.split('-').map(Number);
+    if (!Number.isInteger(year) || !Number.isInteger(month)) {
+      return monthValue;
+    }
+    const shifted = new Date(Date.UTC(year, month - 1 + delta, 1));
+    return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}`;
+  }
 
   function createMonthDay(day) {
     const cell = document.createElement('div');
@@ -143,7 +153,34 @@
     note.className = 'muted';
     note.textContent = '独立于下方统计周期。今天和未来日期保持白色，过完当天后再按完成情况着色。';
     titleWrap.append(title, note);
-    head.appendChild(titleWrap);
+
+    const controls = document.createElement('div');
+    controls.className = 'medication-month-controls';
+
+    const previous = document.createElement('button');
+    previous.type = 'button';
+    previous.className = 'secondary-button';
+    previous.textContent = '← 上一月';
+    previous.addEventListener('click', () => loadMonthOverview(shiftMonth(data.month, -1)));
+
+    const monthPicker = document.createElement('input');
+    monthPicker.type = 'month';
+    monthPicker.value = data.month;
+    monthPicker.setAttribute('aria-label', '选择服药月视图年月');
+    monthPicker.addEventListener('change', () => {
+      if (monthPicker.value) {
+        loadMonthOverview(monthPicker.value);
+      }
+    });
+
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.className = 'secondary-button';
+    next.textContent = '下一月 →';
+    next.addEventListener('click', () => loadMonthOverview(shiftMonth(data.month, 1)));
+
+    controls.append(previous, monthPicker, next);
+    head.append(titleWrap, controls);
     section.appendChild(head);
 
     const legend = document.createElement('div');
@@ -181,7 +218,7 @@
     anchor.before(section);
   }
 
-  async function loadMonthOverview() {
+  async function loadMonthOverview(month = '') {
     const form = document.getElementById('medication-filter-form');
     const toolbar = document.querySelector('.medication-toolbar');
     if (!form || !toolbar) {
@@ -192,17 +229,29 @@
       return;
     }
 
+    const sequence = ++monthOverviewRequestSequence;
+    const params = new URLSearchParams({member});
+    if (month) {
+      params.set('month', month);
+    }
+
     try {
-      const response = await fetch(`/medication/month-overview?member=${encodeURIComponent(member)}`, {
+      const response = await fetch(`/medication/month-overview?${params.toString()}`, {
         credentials: 'same-origin',
         headers: {'Accept': 'application/json'},
       });
       if (!response.ok) {
-        throw new Error(await response.text() || '本月服用情况加载失败');
+        throw new Error(await response.text() || '月度服用情况加载失败');
       }
-      renderMonthOverview(await response.json(), toolbar);
+      const data = await response.json();
+      if (sequence !== monthOverviewRequestSequence) {
+        return;
+      }
+      renderMonthOverview(data, toolbar);
     } catch (err) {
-      console.error('medication month overview:', err);
+      if (sequence === monthOverviewRequestSequence) {
+        console.error('medication month overview:', err);
+      }
     }
   }
 
