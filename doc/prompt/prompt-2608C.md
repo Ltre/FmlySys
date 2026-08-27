@@ -3321,6 +3321,44 @@
 	提交前已实际完成 migration 000010 SQLite 执行验证、Store/adminauth/HTTP 三组编译夹具、模板解析、JS 语法、Passkey A/B 覆盖绑定及服药管理权限筛选检查。当前 GitHub 没有配置/返回该提交的 CI status；完整仓库 `go test ./...` 仍受当前执行环境无法解析 `github.com` 的限制，没有虚报为已运行通过。
 
 	
+问：
+
+	1、对于手动推送的服药通知，不仅要有pwa通知，而且要有termux语音通知；对于超过计划时间2小时还没完成服药的情况，不仅要有pwa通知，而且要有termux语音通知。其他情况暂时还是原来的pwa优先，termux语音兜底的通知推送策略。
+
+	请在分支 dev-2608C-step1 修改，把改动提交并推送该分支到github，不要PR。
+	推理过程及开发日志保存到 doc/devlog/devlog-2608C-features.md。
+	约定每次提问不论需求多少个，代码提交记录仅限产生一次，提交的title和description以中文为主。
+
+	
+答：
+
+	已完成并推送到 `dev-2608C-step1`。
+
+	本轮行为现在是：
+
+	* **手动提醒**：PWA + Termux 语音通知都会主动发送。
+	* **计划时间 +2 小时仍未完成服药**：PWA + Termux 语音通知都必须发送成功。
+	* **计划时间点 scheduled**：保持 PWA 优先、Termux 兜底。
+	* **+1 小时 plus1h**：保持 PWA 优先、Termux 兜底。
+	* +2h 如果某个通道已经成功、另一个失败，重试时**只补发失败的那个通道**，不会重复轰炸已经成功的通道。
+	* Termux 继续实际执行 `termux-notification` + `termux-tts-speak`。
+	* 开发日志已追加到 `doc/devlog/devlog-2608C-features.md` 第 39 节。
+	* 增加了通知通道策略回归测试，并实际做了 SQLite 完成状态验证和 Go 独立夹具测试。
+
+	本轮唯一提交：
+
+	`e363e220cd2c86ef8a3c03f74f173a4cb3144460`
+
+	提交标题：
+
+	`调整服药提醒双通道投递策略`
+
+	远端 `dev-2608C-step1` HEAD 已确认就是这个提交。
+
+	同时 GitHub compare 确认相对于你此前自己的 `d28d3626...`，**ahead_by = 1、total_commits = 1**，严格只新增了本轮这一个提交；没有 PR。
+
+	
+	
 
 ->[2254]
 ->[2770]
