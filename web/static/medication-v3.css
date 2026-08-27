@@ -31,6 +31,102 @@ button:disabled,
   filter: grayscale(0.8);
 }
 
+.medication-month-overview {
+  margin: 1rem 0;
+}
+
+.medication-month-head {
+  margin-bottom: 0.75rem;
+}
+
+.medication-month-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 1rem;
+  margin-bottom: 0.9rem;
+  font-size: 0.9rem;
+}
+
+.medication-month-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.medication-month-swatch {
+  width: 0.95rem;
+  height: 0.95rem;
+  border: 1px solid #c9cdd2;
+  border-radius: 0.2rem;
+  background: #fff;
+}
+
+.medication-month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.medication-month-weekday {
+  padding: 0.3rem 0;
+  text-align: center;
+  color: #667085;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.medication-month-day,
+.medication-month-blank {
+  min-height: 4.75rem;
+  border-radius: 0.65rem;
+}
+
+.medication-month-day {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 0.55rem;
+  border: 1px solid #d8dde3;
+  background: #fff;
+}
+
+.medication-month-day-number {
+  font-size: 1rem;
+}
+
+.medication-month-progress {
+  align-self: flex-end;
+  font-size: 0.8rem;
+  font-weight: 700;
+  opacity: 0.8;
+}
+
+.medication-month-complete {
+  background: #dcfce7;
+  border-color: #86d39d;
+}
+
+.medication-month-partial {
+  background: #fef3c7;
+  border-color: #e8c75c;
+}
+
+.medication-month-missed {
+  background: #fee2e2;
+  border-color: #e7a0a0;
+}
+
+.medication-month-none,
+.medication-month-open {
+  background: #fff;
+}
+
+.medication-month-today {
+  border-width: 2px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
 .checkin-actions-v3 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -67,6 +163,24 @@ button:disabled,
 }
 
 @media (max-width: 640px) {
+  .medication-month-grid {
+    gap: 0.25rem;
+  }
+
+  .medication-month-day,
+  .medication-month-blank {
+    min-height: 3.7rem;
+    border-radius: 0.45rem;
+  }
+
+  .medication-month-day {
+    padding: 0.38rem;
+  }
+
+  .medication-month-progress {
+    font-size: 0.68rem;
+  }
+
   .checkin-actions-v3 {
     grid-template-columns: 1fr;
   }

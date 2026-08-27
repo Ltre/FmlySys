@@ -163,7 +163,7 @@ func (s *Server) runMedicationReminderSweepV3(ctx context.Context, nowTime time.
 		if err != nil || complete {
 			continue
 		}
-		retryAllowed, err := s.Store.MedicationAutomaticStageRetryAllowedV3(ctx, plan.ID, date, stage, nowTime)
+		retryAllowed, err := s.Store.MedicationAutomaticStageRetryAllowedV4(ctx, plan.ID, date, stage, nowTime)
 		if err != nil || !retryAllowed {
 			continue
 		}

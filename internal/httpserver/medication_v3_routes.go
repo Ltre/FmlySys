@@ -5,6 +5,7 @@ import "net/http"
 func (s *Server) WithMedicationV3(next http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /medication", s.member("medication.view", s.medicationV3))
+	mux.HandleFunc("GET /medication/month-overview", s.member("medication.view", s.medicationMonthOverviewV3))
 	mux.HandleFunc("GET /medication/plans", s.member("medication.view", s.medicationPlansFlatV3))
 	mux.HandleFunc("GET /medication/plans/{id}", s.member("medication.view", s.medicationPlanDetailV3))
 	mux.HandleFunc("POST /medication/plans", s.member("medication.view", s.createMedicationPlanV3))
