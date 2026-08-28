@@ -1,0 +1,118 @@
+{{define "admin-audit-v2.html"}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/medication-v2.css">
+  <style>
+    .audit-pagination { display:flex; flex-wrap:wrap; gap:.45rem; align-items:center; margin:1rem 0; }
+    .audit-pagination a, .audit-pagination strong { padding:.45rem .7rem; border:1px solid #d0d7de; border-radius:.45rem; text-decoration:none; }
+    .audit-pagination strong { border-color:currentColor; }
+    .audit-pagination .meta { margin-left:auto; }
+  </style>
+</head>
+<body>
+  {{template "nav" .}}
+  <main class="wrap">
+    <div class="section-head">
+      <div>
+        <h1>访问记录与超级审计</h1>
+        <p class="muted">每页固定 200 条 · 显示时区 <span data-current-timezone>{{.Timezone}}</span></p>
+      </div>
+    </div>
+
+    <nav class="medication-tabs">
+      <a href="/admin/audit?type=access">访问记录</a>
+      <a href="/admin/audit?type=front">前台超级审计</a>
+      <a href="/admin/audit?type=admin">后台超级审计</a>
+    </nav>
+
+    {{template "audit-pagination-v2" .}}
+
+    {{if eq .Kind "access"}}
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>访问时间</th>
+            <th>IP</th>
+            <th>成员</th>
+            <th>请求</th>
+            <th>页面/API</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .AccessLogs}}
+          <tr>
+            <td><time data-fmly-datetime="{{.AccessedAt}}">{{.AccessedAt}}</time></td>
+            <td>{{.IPAddress}}</td>
+            <td>{{.MemberName}} (#{{.MemberID}})</td>
+            <td>{{.Method}}</td>
+            <td>{{.Path}}</td>
+          </tr>
+          {{else}}
+          <tr><td colspan="5">暂无访问记录。</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="table-scroll audit-table">
+      <table>
+        <thead>
+          <tr>
+            <th>操作时间</th>
+            <th>IP</th>
+            <th>操作者</th>
+            <th>数据分类</th>
+            <th>操作</th>
+            <th>对象</th>
+            <th>变动前</th>
+            <th>变动后</th>
+            <th>请求</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .AuditLogs}}
+          <tr>
+            <td><time data-fmly-datetime="{{.OperationTime}}">{{.OperationTime}}</time></td>
+            <td>{{.IPAddress}}</td>
+            <td>{{if eq $.Kind "front"}}{{.MemberName}}{{else}}{{.AdminUsername}}{{end}}</td>
+            <td>{{.DataCategory}}</td>
+            <td>{{if eq .Operation "create"}}增{{else if eq .Operation "delete"}}删{{else if eq .Operation "update"}}改{{else}}{{.Operation}}{{end}}</td>
+            <td>{{if .EntityID}}#{{.EntityID}}{{else}}—{{end}}</td>
+            <td><pre>{{.BeforeJSON}}</pre></td>
+            <td><pre>{{.AfterJSON}}</pre></td>
+            <td>{{.RequestMethod}} {{.RequestPath}}</td>
+          </tr>
+          {{else}}
+          <tr><td colspan="9">暂无真实数据变更审计记录。</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{end}}
+
+    {{template "audit-pagination-v2" .}}
+  </main>
+</body>
+</html>
+{{end}}
+
+{{define "audit-pagination-v2"}}
+<nav class="audit-pagination" aria-label="审计分页">
+  <a href="/admin/audit?type={{.Kind}}&page=1" aria-label="第一页">« 第一页</a>
+  {{range .Pages}}
+    {{if .Current}}
+    <strong aria-current="page">{{.Number}}</strong>
+    {{else}}
+    <a href="/admin/audit?type={{$.Kind}}&page={{.Number}}">{{.Number}}</a>
+    {{end}}
+  {{end}}
+  <a href="/admin/audit?type={{.Kind}}&page={{.TotalPages}}" aria-label="最后一页">最后一页 »</a>
+  <span class="muted meta">第 {{.Page}} / {{.TotalPages}} 页 · 共 {{.TotalRows}} 条</span>
+</nav>
+{{end}}

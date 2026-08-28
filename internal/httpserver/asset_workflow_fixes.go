@@ -309,5 +309,10 @@ func (s *Server) adminWorkflow(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	v.AdminQuickNotes, err = s.Store.AdminQuickMoneyNotes(r.Context())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	s.render(w, "admin.html", v)
 }

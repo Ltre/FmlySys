@@ -231,3 +231,7 @@ FMLYSYS_WECHAT_APP_SECRET=
 ```
 
 旧的 `FMLYSYS_ADDR` 不再使用。
+
+## 别的（警告：AI别改这里）
+
+要成功手动测试termux frp sshd，就要搜索代码"FRP 本地 SSH 地址只允许 localhost/127.0.0.1/::1"，然后注释掉拦截的代码。

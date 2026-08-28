@@ -1,0 +1,67 @@
+{{define "passkey-account-v2.html"}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/mobile.css">
+  <link rel="stylesheet" href="/static/interaction.css">
+</head>
+<body>
+  <main class="wrap">
+    <div class="section-head">
+      <div><h1>Passkey 登录身份</h1><p class="muted">手机号 {{.Identity.Phone}} · {{.Identity.ProfileRemark}}</p></div>
+      <form method="post" action="/passkey/logout"><button class="danger-button">退出登录</button></form>
+    </div>
+
+    {{if .Recovered}}
+    <section class="notice ok"><strong>已通过已有 Passkey 找回同一登录身份</strong><p>本次进入哪个家族成员，由刚刚实际验证成功的那一把 Passkey 的独立关联优先决定。</p></section>
+    {{end}}
+
+    <section class="card">
+      <h2>本次登录状态</h2>
+      {{if .EffectiveMemberID}}
+      <p>本次 Passkey 实际进入成员：<strong>#{{.EffectiveMemberID}} {{.EffectiveMemberName}}</strong></p>
+      {{if .MemberSession}}<p><a class="button-like auth-primary" href="/">进入家族系统</a></p>{{else}}<div class="notice danger"><strong>成员登录态暂未建立</strong><p>该成员可能已停用，请联系管理员。</p></div>{{end}}
+      {{else}}
+      <div class="notice"><strong>本次 Passkey 尚未关联家族成员</strong><p>请等待管理员在后台设置身份默认关联，或给这把 Passkey 单独指定成员。</p></div>
+      {{end}}
+      {{if .Identity.MemberID}}<p class="muted">登录身份默认成员：#{{.Identity.MemberID}} {{.Identity.MemberName}}。具体 Passkey 可以在后台覆盖这个默认值。</p>{{end}}
+      <p class="muted">手机号只负责定位登录身份；真正决定是否可登录以及本次凭据覆盖成员的是 Passkey 验证结果。</p>
+    </section>
+
+    <section class="card">
+      <h2>此身份的 Passkey</h2>
+      <table>
+        <tr><th>备注</th><th>RP 域名</th><th>创建时间</th><th>最近使用</th></tr>
+        {{range .Identity.Credentials}}
+        <tr>
+          <td>{{.Remark}}</td><td><code>{{.RPID}}</code></td>
+          <td><time data-fmly-datetime="{{.CreatedAt}}">{{.CreatedAt}}</time></td>
+          <td>{{if .LastUsedAt}}<time data-fmly-datetime="{{.LastUsedAt}}">{{.LastUsedAt}}</time>{{else}}—{{end}}</td>
+        </tr>
+        {{else}}<tr><td colspan="4">没有可用 Passkey。</td></tr>{{end}}
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>给当前设备新增 Passkey</h2>
+      {{if .Fresh}}
+      <p>只有刚刚通过已有 Passkey 验证后的短时间内才能新增，避免有人仅盗取网页 Session 就给自己加一把 Passkey。</p>
+      <form class="form" data-passkey-add>
+        <label class="wide"><strong>新 Passkey 备注</strong><span class="muted">例如“张三 / Galaxy S23 Ultra”或“张三 / 家中 Windows 电脑”。</span><input name="remark" maxlength="160" placeholder="姓名 / 当前设备名称" required autocomplete="off"></label>
+        <button type="submit" class="wide" data-passkey-add-button hidden>在当前设备创建 Passkey</button>
+        <div class="form-feedback wide" data-passkey-add-status hidden aria-live="polite"></div>
+      </form>
+      {{else}}
+      <div class="notice"><strong>需要重新用已有 Passkey 验证</strong><p>退出后回到登录页，输入同一手机号并使用已有 Passkey 登录；验证完成后的 10 分钟内可给当前设备新增 Passkey。</p></div>
+      {{end}}
+    </section>
+  </main>
+  <script src="/static/timezone.js" defer></script>
+  <script src="/static/passkeys.js" defer></script>
+</body>
+</html>
+{{end}}

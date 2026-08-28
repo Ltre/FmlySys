@@ -1,0 +1,66 @@
+{{define "admin-authorities.html"}}<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+{{template "nav" .}}
+<main class="wrap">
+  <div class="section-head">
+    <div>
+      <h1>成员与权限</h1>
+      <p class="muted">管理员：{{.AdminUsername}} · 当前数据分区：{{.ActivePartition}}</p>
+    </div>
+    <a class="secondary-button" href="/admin">返回后台总览</a>
+  </div>
+
+  <section class="card">
+    <h2>添加成员</h2>
+    <form method="post" action="/admin/members" class="form" data-success="成员已添加">
+      <input name="name" placeholder="姓名" maxlength="80" required>
+      <input name="relation" placeholder="关系/备注" maxlength="160">
+      <div class="wide permission-grid">
+        {{range .PermissionCatalog}}<label><input type="checkbox" name="permissions" value="{{.Key}}" {{if defaultPerm .Key}}checked{{end}}> {{.Label}}</label>{{end}}
+      </div>
+      <button>添加成员</button>
+    </form>
+  </section>
+
+  <div class="member-management-list" data-native-member-management>
+    {{range .Members}}{{$member := .}}
+    <section class="card member-management-card" id="member-{{$member.ID}}">
+      <div class="section-head">
+        <div>
+          <h2>#{{$member.ID}} {{$member.Name}}</h2>
+          <p class="muted">{{$member.Relation}}</p>
+        </div>
+        <form method="post" action="/admin/members/{{$member.ID}}/delete" data-no-async="1" onsubmit="return confirm('确认标记删除该成员？只有公共资产代管余额为 0 时才能删除；成员及历史业务记录会保留。')">
+          <button class="danger-button">标记删除成员</button>
+        </form>
+      </div>
+
+      <h3>成员信息</h3>
+      <form method="post" action="/admin/members/{{$member.ID}}/edit" class="form" data-success="成员信息已保存">
+        <input name="name" value="{{$member.Name}}" placeholder="成员姓名" maxlength="80" required>
+        <input name="relation" value="{{$member.Relation}}" placeholder="关系/备注" maxlength="160">
+        <button>保存成员信息</button>
+      </form>
+
+      <h3>功能权限</h3>
+      <form method="post" action="/admin/members/{{$member.ID}}/permissions" class="form permission-form" data-success="成员权限已保存">
+        <div class="wide permission-grid">
+          {{range $.PermissionCatalog}}<label><input type="checkbox" name="permissions" value="{{.Key}}" {{if memberHasPerm $.MemberPermissions $member.ID .Key}}checked{{end}}> {{.Label}}</label>{{end}}
+        </div>
+        <button>保存权限</button>
+      </form>
+    </section>
+    {{else}}
+    <section class="card"><p class="muted">暂无成员。</p></section>
+    {{end}}
+  </div>
+</main>
+</body>
+</html>{{end}}

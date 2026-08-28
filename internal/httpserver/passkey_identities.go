@@ -60,6 +60,7 @@ func (s *Server) WithPasskeyIdentities(next http.Handler) http.Handler {
 
 	mux.HandleFunc("GET /admin/passkeys", s.adminOnly(s.adminPasskeyIdentitiesPage))
 	mux.HandleFunc("POST /admin/passkeys/{id}/bind", s.adminOnly(s.adminBindPasskeyIdentity))
+	mux.HandleFunc("POST /admin/passkeys/credentials/{id}/delete", s.adminOnly(s.adminDeletePasskeyCredential))
 
 	// Ensure a normal family logout also invalidates the Passkey identity session.
 	mux.HandleFunc("POST /logout", s.passkeyAwareLogout)
@@ -418,6 +419,19 @@ func (s *Server) adminBindPasskeyIdentity(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := s.Store.BindPasskeyLoginIdentity(r.Context(), identityID, memberID); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, "/admin/passkeys")
+}
+
+func (s *Server) adminDeletePasskeyCredential(w http.ResponseWriter, r *http.Request) {
+	credentialID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || credentialID <= 0 {
+		s.fail(w, r, errors.New("Passkey 凭据 ID 无效"))
+		return
+	}
+	if err := s.Store.DeletePasskeyLoginCredential(r.Context(), credentialID); err != nil {
 		s.fail(w, r, err)
 		return
 	}

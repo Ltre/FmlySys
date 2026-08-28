@@ -1,0 +1,27 @@
+{{define "share-info.html"}}<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title><link rel="stylesheet" href="/static/app.css"></head>
+<body>{{template "nav" .}}
+<main class="wrap share-info-wrap" id="archive-detail">
+  {{$canManage := canManageCreated .Permissions .CurrentMember.ID .Archive.CreatedBy "share"}}
+  <div class="section-head">
+    <div><a href="/share">← 返回信息共享</a><h1>{{.Archive.Title}}</h1><p class="muted">发布人：<strong>{{.Archive.CreatorName}}</strong> · 发布于 {{humanDate .Archive.CreatedAt}}</p></div>
+    {{if $canManage}}<details class="inline-editor share-edit-panel"><summary class="secondary-button">编辑</summary><form method="post" action="/share/{{.Archive.ID}}" class="form inner-form" data-success="共享资料已更新"><input name="title" value="{{.Archive.Title}}" placeholder="资料标题" maxlength="160" required><input name="category" value="{{.Archive.Category}}" placeholder="资料分类" maxlength="80" required><textarea class="wide" name="content" placeholder="正文、说明、办事经验等">{{.Archive.Content}}</textarea><button>保存全部修改</button></form></details>{{end}}
+  </div>
+  <article class="card share-detail-card">
+    <span class="tag">{{.Archive.Category}}</span>
+    <div class="pre-wrap share-full-content">{{if .Archive.Content}}{{.Archive.Content}}{{else}}<span class="muted">暂无正文。</span>{{end}}</div>
+  </article>
+
+  <section class="card" id="attachments">
+    <h2>附件</h2>
+    <div class="archive-attachments">
+      {{range .Archive.Attachments}}
+      <div class="archive-attachment-item"><a class="attachment" href="/files/{{.ID}}">📎 {{.OriginalName}}</a>{{if $canManage}}<form method="post" action="/share/{{$.Archive.ID}}/attachments/{{.ID}}/delete" data-no-async="1" onsubmit="return confirm('确认删除这个附件？删除后无法从共享页恢复。')"><button class="danger-button">删除附件</button></form>{{end}}</div>
+      {{else}}<p class="muted">暂无附件</p>{{end}}
+    </div>
+    {{if $canManage}}<form method="post" action="/share/{{.Archive.ID}}/attachments" enctype="multipart/form-data" class="form archive-upload"><label class="wide upload"><strong>继续添加附件</strong><span>可一次选择多个文件；单个文件最大 50MB</span><input type="file" name="file" multiple required></label><button>上传附件</button></form>{{end}}
+  </section>
+</main>
+</body>
+</html>{{end}}

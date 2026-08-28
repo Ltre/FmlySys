@@ -1,1 +1,31 @@
-{{define "share.html"}}<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title><link rel="stylesheet" href="/static/app.css"></head><body>{{template "nav" .}}<main class="wrap"><h1>家族信息共享</h1>{{if hasPerm .Permissions "share.manage"}}<section class="card"><h2>新增共享资料</h2><form method="post" action="/share" class="form"><input name="title" placeholder="资料标题" required><select name="category"><option>家族信息</option><option>祖屋 / 宅基地</option><option>墓地 / 祠堂</option><option>办事资料</option><option>证件资料</option><option>照片</option><option>其他</option></select><textarea class="wide" name="content" placeholder="正文、说明、办事经验等"></textarea><button>保存为全家族可见资料</button></form></section>{{end}}<div class="grid">{{range .Archives}}<article class="card"><h2>{{.Title}}</h2><div><span class="tag">{{.Category}}</span></div><p style="white-space:pre-wrap">{{.Content}}</p>{{range .Attachments}}<a class="attachment" href="/files/{{.ID}}">📎 {{.OriginalName}}</a>{{end}}{{if hasPerm $.Permissions "share.manage"}}<form method="post" action="/share/{{.ID}}/attachments" enctype="multipart/form-data" class="form"><input type="file" name="file" required><button>上传附件</button></form>{{end}}</article>{{else}}<p class="muted">暂无共享资料。</p>{{end}}</div></main></body></html>{{end}}
+{{define "share.html"}}<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title><link rel="stylesheet" href="/static/app.css"></head>
+<body>{{template "nav" .}}
+<main class="wrap">
+  <div class="section-head"><div><h1>家族信息共享</h1><p class="muted">列表仅显示摘要，点击卡片查看完整正文和附件。</p></div></div>
+  {{if hasPerm .Permissions "share.manage_self"}}
+  <section class="card">
+    <h2>新增共享资料</h2>
+    <form method="post" action="/share" class="form">
+      <input name="title" placeholder="资料标题" maxlength="160" required>
+      <select name="category"><option>家族信息</option><option>祖屋 / 宅基地</option><option>墓地 / 祠堂</option><option>办事资料</option><option>证件资料</option><option>照片</option><option>其他</option></select>
+      <textarea class="wide" name="content" placeholder="正文、说明、办事经验等"></textarea>
+      <button>保存为全家族可见资料</button>
+    </form>
+  </section>
+  {{end}}
+
+  <div class="archive-list archive-preview-grid">
+    {{range .Archives}}
+    <a class="card archive-preview-card" id="archive-{{.ID}}" href="/share-info?id={{.ID}}" aria-label="查看共享资料：{{.Title}}">
+      <div class="archive-preview-head"><span class="tag">{{.Category}}</span><span class="muted">{{humanDate .CreatedAt}}</span></div>
+      <h2>{{.Title}}</h2>
+      <p class="archive-preview-summary">{{if .Summary}}{{.Summary}}{{else}}（暂无正文）{{end}}</p>
+      <div class="archive-preview-meta"><span>发布人：<strong>{{.CreatorName}}</strong></span><span>附件 {{.AttachmentCount}} 个</span></div>
+    </a>
+    {{else}}<section class="card"><p class="muted">暂无共享资料。</p></section>{{end}}
+  </div>
+</main>
+</body>
+</html>{{end}}

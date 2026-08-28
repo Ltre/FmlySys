@@ -1,0 +1,36 @@
+{{define "medication.html"}}<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title><link rel="stylesheet" href="/static/app.css"></head>
+<body>{{template "nav" .}}
+<main class="wrap medication-wrap">
+  <h1>老大药物服用管理</h1>
+  <p class="notice">本区只按出院医嘱记录服药计划和家人确认结果，不在系统内自行改药或停药。“已确认服用”应由亲眼确认或已核实的照护人登记。</p>
+
+  <form method="get" action="/medication" class="form card medication-date-filter"><label>查看日期<input type="date" name="date" value="{{.MedicationDate}}" required></label><button>查看</button></form>
+
+  <section>
+    <h2>最近 7 天统计</h2>
+    <p class="muted">{{.MedicationSummary.FromDate}} 至 {{.MedicationSummary.ToDate}}</p>
+    <div class="grid medication-stats"><section class="card"><div class="muted">计划次数</div><div class="metric">{{.MedicationSummary.Scheduled}}</div></section><section class="card"><div class="muted">已确认服用</div><div class="metric ok">{{.MedicationSummary.Taken}}</div></section><section class="card"><div class="muted">已登记未服</div><div class="metric danger">{{.MedicationSummary.Missed}}</div></section><section class="card"><div class="muted">尚未登记</div><div class="metric">{{.MedicationSummary.Unrecorded}}</div></section><section class="card"><div class="muted">已确认服用率</div><div class="metric">{{.MedicationSummary.TakenPercent}}%</div></section></div>
+  </section>
+
+  {{if hasPerm .Permissions "medication.manage"}}
+  <details class="card medication-plan-create"><summary class="secondary-button">新增用药计划</summary><p class="muted">同一药品每天多次服用时，请按每个时间分别建立计划。</p><form method="post" action="/medication/plans" class="form inner-form" data-success="用药计划已创建"><select name="patient_member_id" required><option value="">选择服药成员</option>{{range .Members}}<option value="{{.ID}}">{{.Name}}（{{.Relation}}）</option>{{end}}</select><input name="medicine_name" placeholder="药品名称（以医嘱为准）" maxlength="120" required><input name="dosage" placeholder="每次用量，如 1 片" maxlength="120" required><label>计划时间<input type="time" name="scheduled_time" required></label><label>开始日期<input type="date" name="start_date" value="{{.MedicationDate}}" required></label><textarea class="wide" name="instructions" placeholder="服药说明，如饭后服用" maxlength="500"></textarea><button>创建计划</button></form></details>
+  {{end}}
+
+  <section>
+    <h2>{{.MedicationDate}} 服药记录</h2>
+    <div class="medication-plan-list">
+      {{range .MedicationPlans}}
+      <article class="card medication-plan-card {{if eq .RecordStatus "taken"}}is-taken{{else if eq .RecordStatus "missed"}}is-missed{{end}}" id="medication-plan-{{.ID}}">
+        <div class="section-head"><div><h3>{{.ScheduledTime}} · {{.MedicineName}}</h3><p><strong>{{.PatientName}}</strong> · {{.Dosage}}</p></div>{{if eq .RecordStatus "taken"}}<span class="tag medication-status-taken">已确认服用</span>{{else if eq .RecordStatus "missed"}}<span class="tag medication-status-missed">未服用</span>{{else}}<span class="tag">尚未登记</span>{{end}}</div>
+        {{if .Instructions}}<p class="muted">医嘱/说明：{{.Instructions}}</p>{{end}}
+        {{if .RecordStatus}}<p class="muted">登记人：{{.RecordedByName}} · 登记时间：{{humanDate .RecordedAt}}{{if .RecordNote}} · 备注：{{.RecordNote}}{{end}}</p>{{end}}
+        {{if hasPerm $.Permissions "medication.manage"}}<form method="post" action="/medication/plans/{{.ID}}/records" class="form medication-record-form" data-success="服药记录已保存"><input type="hidden" name="scheduled_date" value="{{$.MedicationDate}}"><select name="status" required><option value="">选择确认结果</option><option value="taken" {{if eq .RecordStatus "taken"}}selected{{end}}>已确认服用</option><option value="missed" {{if eq .RecordStatus "missed"}}selected{{end}}>未服用</option></select><input name="note" value="{{.RecordNote}}" placeholder="备注（可选）" maxlength="500"><button>保存服药情况</button></form>{{if not .EndDate}}<form method="post" action="/medication/plans/{{.ID}}/end" class="medication-end-form" data-no-async="1" onsubmit="return confirm('确认在所选日期结束该计划？当天及更早的历史记录会保留。')"><input type="hidden" name="end_date" value="{{$.MedicationDate}}"><button class="danger-button">结束计划</button></form>{{end}}{{end}}
+      </article>
+      {{else}}<section class="card"><p class="muted">当天没有生效的用药计划。</p></section>{{end}}
+    </div>
+  </section>
+</main>
+</body>
+</html>{{end}}

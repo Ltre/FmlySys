@@ -12,10 +12,10 @@ import (
 
 func TestNormalizePasskeyPhone(t *testing.T) {
 	cases := map[string]string{
-		"13800138000":       "+8613800138000",
-		"+86 138-0013-8000": "+8613800138000",
+		"13800138000":        "+8613800138000",
+		"+86 138-0013-8000":  "+8613800138000",
 		"0086 138 0013 8000": "+8613800138000",
-		"+65 (8123) 4567":   "+6581234567",
+		"+65 (8123) 4567":    "+6581234567",
 		"1234567":            "1234567",
 	}
 	for input, want := range cases {
@@ -89,6 +89,37 @@ func TestPasskeyLoginIdentityLifecycle(t *testing.T) {
 	}
 	if view.MemberID != memberID || view.MemberName != "张三" {
 		t.Fatalf("bound view=%+v", view)
+	}
+	secondCredential := *credential
+	secondCredential.ID = []byte{9, 8, 7, 6}
+	if err := s.SavePasskeyLoginCredential(ctx, identityID, "fmly.miku.us", "张三 / MacBook", &secondCredential); err != nil {
+		t.Fatal(err)
+	}
+	view.Credentials, err = s.PasskeyLoginCredentialViews(ctx, identityID)
+	if err != nil || len(view.Credentials) != 2 {
+		t.Fatalf("credentials=%+v err=%v", view.Credentials, err)
+	}
+	credentialID := view.Credentials[0].ID
+	if err := s.DeletePasskeyLoginCredential(ctx, credentialID); err != nil {
+		t.Fatal(err)
+	}
+	identities, err := s.AllPasskeyLoginIdentities(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(identities) != 1 || identities[0].ID != identityID || identities[0].MemberID != memberID || len(identities[0].Credentials) != 1 {
+		t.Fatalf("identity/member must remain after credential deletion: %+v", identities)
+	}
+	if err := s.DeletePasskeyLoginCredential(ctx, identities[0].Credentials[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	identities, err = s.AllPasskeyLoginIdentities(ctx)
+	if err != nil || len(identities) != 0 {
+		t.Fatalf("empty login identity should be removed: identities=%+v err=%v", identities, err)
+	}
+	var memberCount int
+	if err := s.DB.QueryRow(`SELECT COUNT(1) FROM members WHERE id=?`, memberID).Scan(&memberCount); err != nil || memberCount != 1 {
+		t.Fatalf("associated member was changed: count=%d err=%v", memberCount, err)
 	}
 }
 

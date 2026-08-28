@@ -131,16 +131,33 @@ type Evidence struct {
 type Matter struct {
 	ID                                                                           int64
 	ParentID                                                                     *int64
+	ParentIDValue, OwnerMemberID, CreatedBy                                      int64
 	ParentTitle, Title, Type, Description, Status, StartDate, DueDate, OwnerName string
+	CreatorName                                                                  string
 	ExpenseCent                                                                  int64
 }
 type Archive struct {
-	ID                                              int64
-	Title, Category, Content, Visibility, CreatedAt string
-	Attachments                                     []Attachment
+	ID                                                                    int64
+	CreatedBy                                                             int64
+	AttachmentCount                                                       int
+	Title, Category, Content, Summary, Visibility, CreatorName, CreatedAt string
+	Attachments                                                           []Attachment
 }
 type Attachment struct {
 	ID                     int64
 	OriginalName, MimeType string
 	Size                   int64
+}
+
+type MedicationPlan struct {
+	ID, PatientMemberID, CreatedBy, RecordID, RecordedBy int64
+	PatientName, MedicineName, Dosage, ScheduledTime     string
+	Instructions, StartDate, EndDate                     string
+	RecordStatus, RecordNote, RecordedByName, RecordedAt string
+}
+
+type MedicationSummary struct {
+	FromDate, ToDate                     string
+	Scheduled, Taken, Missed, Unrecorded int
+	TakenPercent                         int
 }

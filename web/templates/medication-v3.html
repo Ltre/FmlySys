@@ -1,0 +1,285 @@
+{{define "medication-v3.html"}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/medication-v2.css">
+  <link rel="stylesheet" href="/static/medication-v3.css">
+</head>
+<body>
+  {{template "nav" .}}
+  <main class="wrap medication-v2-wrap">
+    <div class="section-head">
+      <div>
+        <h1>服药管理</h1>
+        <p class="muted">设备显示时区：<span data-current-timezone>{{.Timezone}}</span></p>
+      </div>
+      <div class="quick-actions">
+        <a class="secondary-button" href="/medication/plans">全部计划列表</a>
+        <button type="button" class="secondary-button" data-enable-medication-push>启用 PWA 服药通知</button>
+      </div>
+    </div>
+
+    {{if .Message}}<p class="notice">{{.Message}}</p>{{end}}
+    {{if .HasClosedPlans}}
+    <div class="medication-closed-alert">该成员存在已经过期或已手动结束的服药计划。结束后的计划只保留查看，服药登记、验证与提醒操作全部锁定。</div>
+    {{end}}
+
+    {{if .Patients}}
+    <nav class="medication-tabs">
+      {{range .Patients}}
+      <a class="{{if eq .ID $.SelectedPatient}}active{{end}}" href="/medication?member={{.ID}}&date={{$.MedicationDate}}&range={{$.RangeDays}}">{{.Name}}</a>
+      {{end}}
+    </nav>
+    {{else}}
+    <section class="card"><p class="muted">还没有任何服药计划。</p></section>
+    {{end}}
+
+    <div class="grid medication-toolbar">
+      <form method="get" action="/medication" class="card form" id="medication-filter-form">
+        <input type="hidden" name="member" value="{{.SelectedPatient}}">
+        <label>
+          查看日期
+          <input type="date" name="date" value="{{.MedicationDate}}" required onchange="this.form.submit()">
+        </label>
+        <label>
+          统计周期
+          <select name="range" onchange="this.form.submit()">
+            <option value="7" {{if eq .RangeDays 7}}selected{{end}}>近 7 天</option>
+            <option value="14" {{if eq .RangeDays 14}}selected{{end}}>近 14 天</option>
+            <option value="30" {{if eq .RangeDays 30}}selected{{end}}>近 30 天</option>
+            <option value="90" {{if eq .RangeDays 90}}selected{{end}}>近 3 个月</option>
+            <option value="180" {{if eq .RangeDays 180}}selected{{end}}>近 6 个月</option>
+            <option value="365" {{if eq .RangeDays 365}}selected{{end}}>近 1 年</option>
+          </select>
+        </label>
+        <p class="muted">切换日期或统计周期会自动加载，无需“应用”。</p>
+      </form>
+
+      <section class="card">
+        <h3>统计</h3>
+        <p class="muted">{{.Summary.FromDate}} 至 {{.Summary.ToDate}}</p>
+        <div class="medication-stat-row">
+          <span>计划 {{.Summary.Scheduled}}</span>
+          <span class="ok">已服 {{.Summary.Taken}}</span>
+          <span class="danger">未服 {{.Summary.Missed}}</span>
+          <span>未登记 {{.Summary.Unrecorded}}</span>
+          <strong>{{.Summary.TakenPercent}}%</strong>
+        </div>
+      </section>
+    </div>
+
+    {{if hasPerm .Permissions "medication.manage_self"}}
+    <details class="card">
+      <summary class="secondary-button">新增服药计划</summary>
+      <form method="post" action="/medication/plans" class="form inner-form">
+        <input type="hidden" name="timezone" value="{{.Timezone}}" data-device-timezone>
+        <select name="patient_member_id" required>
+          <option value="">选择服药人</option>
+          {{range .Members}}
+          <option value="{{.ID}}" {{if eq .ID $.SelectedPatient}}selected{{end}}>{{.Name}}（{{.Relation}}）</option>
+          {{end}}
+        </select>
+        <input name="medicine_name" placeholder="药品名称" maxlength="120" required>
+        <input name="dosage" placeholder="每次用量，如 1 片" maxlength="120" required>
+        <label>计划时间 <input type="time" name="scheduled_time" required></label>
+        <label>开始日期 <input type="date" name="start_date" value="{{.MedicationDate}}" required></label>
+        <label>结束日期（可选） <input type="date" name="end_date"><span class="muted">留空表示长期</span></label>
+        <textarea class="wide" name="instructions" placeholder="服药说明" maxlength="500"></textarea>
+        <button>创建计划</button>
+      </form>
+    </details>
+    {{end}}
+
+    <section>
+      <h2>{{.MedicationDate}} · {{if .SelectedPatient}}该成员的全部计划{{else}}服药计划{{end}}</h2>
+      <div class="medication-plan-list">
+        {{range .Plans}}
+        <article class="card medication-plan-card {{if not .Actionable}}medication-plan-disabled{{end}}" id="medication-plan-{{.Plan.ID}}">
+          <div class="section-head">
+            <div>
+              <h3>{{.Plan.ScheduledTime}} · {{.Plan.MedicineName}}</h3>
+              <p><strong>{{.Plan.PatientName}}</strong> · {{.Plan.Dosage}}</p>
+            </div>
+            <span class="tag {{if eq .Status "进行中"}}medication-status-active{{else}}medication-status-ended{{end}}">{{.Status}}</span>
+          </div>
+          {{if .Plan.Instructions}}<p class="muted">说明：{{.Plan.Instructions}}</p>{{end}}
+          <p class="muted">计划：{{.Plan.StartDate}} ～ {{if .Plan.EndDate}}{{.Plan.EndDate}}{{else}}长期{{end}} · 计划时区 {{.Plan.Timezone}} · 创建人 {{.Plan.CreatorName}}</p>
+          {{if .Plan.EndedAt}}<p class="medication-closed-alert compact">已于 <time data-fmly-datetime="{{.Plan.EndedAt}}">{{.Plan.EndedAt}}</time> 手动结束。</p>{{end}}
+          {{if .ActionReason}}<p class="muted">当前不可操作：{{.ActionReason}}</p>{{end}}
+
+          <div class="quick-actions">
+            <a class="secondary-button" href="/medication/plans/{{.Plan.ID}}?date={{$.MedicationDate}}">进入详情</a>
+            {{if .CanManage}}
+            <form method="post" action="/medication/plans/{{.Plan.ID}}/notify">
+              <button {{if not .Actionable}}disabled class="disabled-button"{{end}}>提醒服药</button>
+            </form>
+            {{end}}
+          </div>
+
+          {{if .CanManage}}
+          <form method="post" action="/medication/plans/{{.Plan.ID}}/records" class="form">
+            <input type="hidden" name="scheduled_date" value="{{$.MedicationDate}}">
+            <select name="status" required {{if not .Actionable}}disabled{{end}}>
+              <option value="">服药结果</option>
+              <option value="taken" {{if eq .Plan.RecordStatus "taken"}}selected{{end}}>已确认服用</option>
+              <option value="missed" {{if eq .Plan.RecordStatus "missed"}}selected{{end}}>未服用</option>
+            </select>
+            <input name="note" value="{{.Plan.RecordNote}}" placeholder="备注（可选）" {{if not .Actionable}}disabled{{end}}>
+            <button {{if not .Actionable}}disabled class="disabled-button"{{end}}>保存服药情况</button>
+          </form>
+          {{end}}
+        </article>
+        {{else}}
+        <section class="card"><p class="muted">该成员没有服药计划。</p></section>
+        {{end}}
+      </div>
+    </section>
+  </main>
+  <script src="/static/medication-push.js" defer></script>
+</body>
+</html>
+{{end}}
+
+{{define "medication-plans-v3.html"}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/medication-v3.css">
+</head>
+<body>
+  {{template "nav" .}}
+  <main class="wrap">
+    <div class="section-head"><div><h1>全部服药计划</h1><p class="muted">已结束计划继续保留，但服药操作锁定。</p></div><a class="secondary-button" href="/medication">返回服药管理</a></div>
+    {{if .Message}}<p class="notice">{{.Message}}</p>{{end}}
+    <div class="grid">
+      {{range .Plans}}
+      <a class="card {{if not .Actionable}}medication-plan-disabled{{end}}" href="/medication/plans/{{.Plan.ID}}" style="text-decoration:none;color:inherit">
+        <div class="section-head"><div><h3>{{.Plan.PatientName}} · {{.Plan.MedicineName}}</h3><p>{{.Plan.ScheduledTime}} · {{.Plan.Dosage}}</p></div><span class="tag">{{.Status}}</span></div>
+        <p class="muted">{{.Plan.StartDate}} ～ {{if .Plan.EndDate}}{{.Plan.EndDate}}{{else}}长期{{end}} · {{.Plan.Timezone}}</p>
+      </a>
+      {{else}}<section class="card"><p class="muted">暂无服药计划。</p></section>{{end}}
+    </div>
+  </main>
+</body>
+</html>
+{{end}}
+
+{{define "medication-plan-detail-v3.html"}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/medication-v2.css"><link rel="stylesheet" href="/static/medication-v3.css">
+</head>
+<body>
+  {{template "nav" .}}
+  <main class="wrap">
+    <div class="section-head"><div><h1>服药计划详情</h1><p class="muted">#{{.Plan.ID}} · 创建人 {{.Plan.CreatorName}}</p></div><a class="secondary-button" href="/medication/plans">全部计划</a></div>
+    {{if .Message}}<p class="notice">{{.Message}}</p>{{end}}
+    {{if not .Actionable}}<div class="medication-closed-alert">当前计划不可再执行服药登记、签到验证或提醒：{{.ActionReason}}。相关操作已灰显锁定。</div>{{end}}
+
+    <section class="card">
+      <div class="section-head"><div><h2>{{.Plan.PatientName}} · {{.Plan.MedicineName}}</h2><p>{{.Plan.ScheduledTime}} · {{.Plan.Dosage}}</p></div><span class="tag">{{.Status}}</span></div>
+      <p>{{.Plan.Instructions}}</p>
+      <p class="muted">有效期：{{.Plan.StartDate}} ～ {{if .Plan.EndDate}}{{.Plan.EndDate}}{{else}}长期{{end}} · 计划时区 {{.Plan.Timezone}}</p>
+      {{if .Plan.EndedAt}}<p>手动结束时间：<time data-fmly-datetime="{{.Plan.EndedAt}}">{{.Plan.EndedAt}}</time>{{if .Plan.EndedByName}} · 操作人 {{.Plan.EndedByName}}{{end}}</p>{{end}}
+    </section>
+
+    <form method="get" class="card form">
+      <label>查看/登记日期 <input type="date" name="date" value="{{.Date}}" required onchange="this.form.submit()"></label>
+      <p class="muted">切换日期后自动加载，不需要“查看”按钮。</p>
+    </form>
+
+    <section class="card">
+      <h2>{{.Date}} 服药状态</h2>
+      {{if eq .Plan.CheckinStatus "pending"}}<p class="notice">服药人已点击“我已服药”，等待管理者验证；自动催促已经暂停。</p>{{end}}
+      {{if .Plan.CheckinResponse}}<p>服药人反馈：<strong>{{if eq .Plan.CheckinResponse "taken"}}我已服药{{else}}等下再说{{end}}</strong> · <time data-fmly-datetime="{{.Plan.CheckinAt}}">{{.Plan.CheckinAt}}</time></p>{{end}}
+      {{if .Plan.RecordStatus}}<p>当前确认结果：<strong>{{if eq .Plan.RecordStatus "taken"}}已确认服用{{else}}未服用{{end}}</strong> · 登记人 {{.Plan.RecordedByName}} <time data-fmly-datetime="{{.Plan.RecordedAt}}">{{.Plan.RecordedAt}}</time></p>{{end}}
+
+      {{if .CanManage}}
+        {{if eq .Plan.CheckinStatus "pending"}}
+        <div class="quick-actions">
+          <form method="post" action="/medication/plans/{{.Plan.ID}}/verify"><input type="hidden" name="scheduled_date" value="{{.Date}}"><input type="hidden" name="result" value="confirmed"><button {{if not .Actionable}}disabled class="disabled-button"{{end}}>确实已经服药</button></form>
+          <form method="post" action="/medication/plans/{{.Plan.ID}}/verify"><input type="hidden" name="scheduled_date" value="{{.Date}}"><input type="hidden" name="result" value="rejected"><button class="danger-button {{if not .Actionable}}disabled-button{{end}}" {{if not .Actionable}}disabled{{end}}>并没有服药</button></form>
+        </div>
+        {{end}}
+        <form method="post" action="/medication/plans/{{.Plan.ID}}/records" class="form">
+          <input type="hidden" name="scheduled_date" value="{{.Date}}">
+          <select name="status" required {{if not .Actionable}}disabled{{end}}><option value="">选择结果</option><option value="taken" {{if eq .Plan.RecordStatus "taken"}}selected{{end}}>已确认服用</option><option value="missed" {{if eq .Plan.RecordStatus "missed"}}selected{{end}}>未服用</option></select>
+          <input name="note" value="{{.Plan.RecordNote}}" placeholder="备注" {{if not .Actionable}}disabled{{end}}>
+          <button {{if not .Actionable}}disabled class="disabled-button"{{end}}>保存服药情况</button>
+        </form>
+        <form method="post" action="/medication/plans/{{.Plan.ID}}/notify"><button {{if not .Actionable}}disabled class="disabled-button"{{end}}>推送提醒给服药人</button></form>
+      {{end}}
+    </section>
+
+    {{if .CanManage}}
+    <details class="card" open>
+      <summary><strong>修改计划</strong></summary>
+      <form method="post" action="/medication/plans/{{.Plan.ID}}" class="form inner-form">
+        <input type="hidden" name="timezone" value="{{.Plan.Timezone}}">
+        <select name="patient_member_id" required>{{range .Members}}<option value="{{.ID}}" {{if eq .ID $.Plan.PatientMemberID}}selected{{end}}>{{.Name}}</option>{{end}}</select>
+        <input name="medicine_name" value="{{.Plan.MedicineName}}" required>
+        <input name="dosage" value="{{.Plan.Dosage}}" required>
+        <label>计划时间 <input type="time" name="scheduled_time" value="{{.Plan.ScheduledTime}}" required></label>
+        <label>开始日期 <input type="date" name="start_date" value="{{.Plan.StartDate}}" required></label>
+        <label>结束日期（留空=长期） <input type="date" name="end_date" value="{{.Plan.EndDate}}"></label>
+        <textarea class="wide" name="instructions">{{.Plan.Instructions}}</textarea>
+        <button>保存修改</button>
+      </form>
+    </details>
+
+    <section class="card">
+      <div class="quick-actions">
+        <form method="post" action="/medication/plans/{{.Plan.ID}}/end"><button class="danger-button {{if not .Actionable}}disabled-button{{end}}" {{if not .Actionable}}disabled{{end}}>结束计划</button></form>
+        <form method="post" action="/medication/plans/{{.Plan.ID}}/delete" onsubmit="return confirm('确认标记删除该计划？')"><button class="danger-button">删除计划（标记删除）</button></form>
+      </div>
+      <p class="muted">“结束计划”现在立即写入结束状态，不再使用旁边的日期控件。</p>
+    </section>
+    {{end}}
+
+    <section class="card">
+      <h2>通知投递记录</h2>
+      <div class="table-scroll"><table><thead><tr><th>时间</th><th>节点</th><th>渠道</th><th>结果</th><th>详情</th></tr></thead><tbody>
+        {{range .Deliveries}}<tr><td><time data-fmly-datetime="{{.CreatedAt}}">{{.CreatedAt}}</time></td><td>{{.Stage}}</td><td>{{.Channel}}</td><td>{{.Status}}</td><td>{{.Detail}}</td></tr>{{else}}<tr><td colspan="5">暂无投递记录</td></tr>{{end}}
+      </tbody></table></div>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}
+
+{{define "medication-checkin-v3.html"}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/medication-v3.css">
+</head>
+<body>
+  {{template "nav" .}}
+  <main class="wrap medication-checkin">
+    <h1>服药签到</h1>
+    {{if .Message}}<p class="notice">{{.Message}}</p>{{end}}
+    {{if not .Actionable}}<div class="medication-closed-alert">该计划当前不可签到：{{.ActionReason}}。按钮已锁定。</div>{{end}}
+    <section class="card">
+      <div class="section-head"><div><h2>{{.Plan.ScheduledTime}} · {{.Plan.MedicineName}}</h2><p><strong>{{.Plan.Dosage}}</strong></p></div><span class="tag">{{.Status}}</span></div>
+      {{if .Plan.Instructions}}<p class="muted">{{.Plan.Instructions}}</p>{{end}}
+      {{if eq .Plan.CheckinStatus "pending"}}<p class="notice">你已提交“我已服药”，正在等待家人验证；系统不会仅因为尚未验证而继续催促。</p>{{end}}
+      <div class="checkin-actions-v3">
+        <form method="post" action="/medication/checkin"><input type="hidden" name="plan_id" value="{{.Plan.ID}}"><input type="hidden" name="scheduled_date" value="{{.Date}}"><input type="hidden" name="response" value="taken"><button class="checkin-taken" {{if not .Actionable}}disabled{{end}}>我已服药</button></form>
+        <form method="post" action="/medication/checkin"><input type="hidden" name="plan_id" value="{{.Plan.ID}}"><input type="hidden" name="scheduled_date" value="{{.Date}}"><input type="hidden" name="response" value="later"><button class="checkin-later" {{if not .Actionable}}disabled{{end}}>等下再说</button></form>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}

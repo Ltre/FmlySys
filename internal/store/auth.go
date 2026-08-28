@@ -30,9 +30,13 @@ var PermissionCatalog = []PermissionDef{
 	{Key: "transfers.create", Label: "⇄登记成员间转账"},
 	{Key: "reimbursements.create", Label: "登记报销"},
 	{Key: "matters.view", Label: "查看家族事务"},
-	{Key: "matters.manage", Label: "管理家族事务"},
+	{Key: "matters.manage_self", Label: "管理自己创建的家族事务"},
+	{Key: "matters.manage_others", Label: "管理其他成员创建的家族事务"},
 	{Key: "share.view", Label: "查看家族共享资料"},
-	{Key: "share.manage", Label: "管理家族共享资料"},
+	{Key: "share.manage_self", Label: "管理自己共享的资料"},
+	{Key: "share.manage_others", Label: "管理其他成员共享的资料"},
+	{Key: "medication.view", Label: "查看老大药物服用管理"},
+	{Key: "medication.manage", Label: "维护用药计划与服药记录"},
 }
 
 var DefaultMemberPermissions = []string{
@@ -89,8 +93,33 @@ func normalizePermissions(perms []string) ([]string, error) {
 		seen[p] = true
 		out = append(out, p)
 	}
+	dependencies := map[string]string{
+		"matters.manage_self":   "matters.view",
+		"matters.manage_others": "matters.view",
+		"share.manage_self":     "share.view",
+		"share.manage_others":   "share.view",
+		"medication.manage":     "medication.view",
+	}
+	for permission, required := range dependencies {
+		if seen[permission] && !seen[required] {
+			seen[required] = true
+			out = append(out, required)
+		}
+	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// CanManageCreatedRecord applies the split self/others permission boundary to
+// records whose creator is immutable. Supported domains are matters and share.
+func CanManageCreatedRecord(perms map[string]bool, memberID, creatorID int64, domain string) bool {
+	if memberID <= 0 || creatorID <= 0 || (domain != "matters" && domain != "share") {
+		return false
+	}
+	if memberID == creatorID {
+		return perms[domain+".manage_self"]
+	}
+	return perms[domain+".manage_others"]
 }
 
 func (s *Store) SetMemberPermissions(ctx context.Context, memberID int64, perms []string) error {
@@ -430,7 +459,13 @@ func (s *Store) RejectJoinRequest(ctx context.Context, auditActor, requestID int
 }
 
 func (s *Store) FamilyArchives(ctx context.Context) ([]Archive, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,title,category,content,visibility,created_at FROM archives WHERE visibility='family' ORDER BY created_at DESC,id DESC`)
+	rows, err := s.DB.QueryContext(ctx, `
+SELECT a.id,a.title,a.category,a.content,a.visibility,a.created_by,COALESCE(m.name,''),a.created_at,
+       (SELECT COUNT(1) FROM attachments att WHERE att.archive_id=a.id)
+FROM archives a
+LEFT JOIN members m ON m.id=a.created_by
+WHERE a.visibility='family'
+ORDER BY a.created_at DESC,a.id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -438,14 +473,10 @@ func (s *Store) FamilyArchives(ctx context.Context) ([]Archive, error) {
 	var out []Archive
 	for rows.Next() {
 		var v Archive
-		if err := rows.Scan(&v.ID, &v.Title, &v.Category, &v.Content, &v.Visibility, &v.CreatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.Title, &v.Category, &v.Content, &v.Visibility, &v.CreatedBy, &v.CreatorName, &v.CreatedAt, &v.AttachmentCount); err != nil {
 			return nil, err
 		}
-		atts, err := s.Attachments(ctx, v.ID)
-		if err != nil {
-			return nil, err
-		}
-		v.Attachments = atts
+		v.Summary = UTF8Summary(v.Content, 100)
 		out = append(out, v)
 	}
 	return out, rows.Err()
