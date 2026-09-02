@@ -1,0 +1,68 @@
+{{define "research.html"}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/research.css">
+</head>
+<body>
+  {{template "nav" .}}
+  <main class="wrap research-wrap" data-research-member="{{.CurrentMember.ID}}">
+    <section class="research-browser card">
+      <div class="research-tabs" data-research-tabs>
+        <button type="button" class="research-new-tab" data-research-new-tab title="新建标签页">＋</button>
+      </div>
+      <form class="research-address" data-research-address-form>
+        <button type="button" class="secondary-button research-nav-button" data-research-back title="后退">←</button>
+        <button type="button" class="secondary-button research-nav-button" data-research-forward title="前进">→</button>
+        <button type="button" class="secondary-button research-nav-button" data-research-refresh title="刷新">↻</button>
+        <input type="text" inputmode="url" autocomplete="off" spellcheck="false" data-research-address placeholder="输入网址，例如 wikipedia.org" aria-label="网址">
+        <button type="submit">前往</button>
+      </form>
+
+      <div class="research-sites" aria-label="推荐网址">
+        {{range .QuickSites}}
+        <button type="button" class="research-site" data-research-open="{{.URL}}" title="{{.Name}}">
+          <span class="research-site-logo" aria-hidden="true"><img src="/research/proxy?member={{$.CurrentMember.ID}}&url={{urlquery .IconURL}}" alt="" loading="lazy" onerror="this.remove();this.parentElement.textContent='{{.Logo}}'"></span>
+          <span>{{.Name}}</span>
+        </button>
+        {{end}}
+      </div>
+
+      <div class="research-frame-shell" data-research-frame-shell>
+        <div class="research-start" data-research-start>
+          <h1>查资料</h1>
+          <p class="muted">网址由 FmlySys 所在的境外服务器代为访问。第三方网页脚本会被禁用，以避免外部网页接触家族系统登录态。</p>
+        </div>
+        <iframe class="research-frame" data-research-frame title="页内浏览器" sandbox="allow-forms allow-same-origin" referrerpolicy="no-referrer"></iframe>
+      </div>
+    </section>
+
+    <section class="research-feed">
+      <div class="section-head">
+        <div>
+          <h2>为家庭推荐</h2>
+          <p class="muted">类似 Google Feed 的资料入口。推荐依据只在 FmlySys 内部生成，不会在你点击前把家庭内容发给第三方。</p>
+        </div>
+      </div>
+      <div class="research-feed-list">
+        {{range .Recommendations}}
+        <article class="card research-feed-card">
+          <span class="tag">{{.Source}}</span>
+          <h3>{{.Title}}</h3>
+          <p>{{.Description}}</p>
+          <button type="button" class="secondary-button" data-research-open="{{.URL}}">查相关资料</button>
+        </article>
+        {{else}}
+        <article class="card"><p class="muted">目前没有可生成的家庭资料建议。</p></article>
+        {{end}}
+      </div>
+    </section>
+  </main>
+  <script src="/static/research.js" defer></script>
+</body>
+</html>
+{{end}}
