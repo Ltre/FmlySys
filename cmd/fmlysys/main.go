@@ -17,6 +17,8 @@ import (
 )
 
 func main() {
+	// All server-side fallback formatting uses UTC+8. Browser pages then adopt
+	// the device IANA timezone through fmly_timezone/timezone.js.
 	if loc, err := time.LoadLocation("Asia/Shanghai"); err == nil {
 		time.Local = loc
 	} else {
@@ -76,7 +78,6 @@ func main() {
 	handler = app.WithMedicationEnhancements(handler)
 	handler = app.WithMedicationV3(handler)
 	handler = app.WithNotificationCenter(handler)
-	handler = app.WithResearch(handler)
 	handler = app.WithAuditConsole(handler)
 	handler = app.WithAuditConsoleV2(handler)
 	handler = app.WithPasskeyUnifiedLogin(handler)
