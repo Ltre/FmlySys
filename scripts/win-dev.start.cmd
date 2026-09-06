@@ -16,6 +16,13 @@ set "all_proxy=%ALL_PROXY%"
 set "NO_PROXY=127.0.0.1,localhost"
 set "no_proxy=%NO_PROXY%"
 
+rem Use alternate module sources on ANY error, including HTTP/2 stream failures.
+rem A comma only falls back on HTTP 404/410. Keep pipes inside quoted assignments.
+rem Override FMLYSYS_GOPROXY before launching if a custom/private mirror is required.
+rem This overrides machine Go settings only for this launcher; no go env -w is used.
+if not defined FMLYSYS_GOPROXY set "FMLYSYS_GOPROXY=https://proxy.golang.org|https://goproxy.cn|direct"
+set "GOPROXY=%FMLYSYS_GOPROXY%"
+
 rem Listener settings: FMLYSYS_PORT is the single source of truth for the server port.
 rem 0.0.0.0 listens on every local IPv4 interface so localhost, LAN IPs and hostnames can reach the same server.
 set "FMLYSYS_BIND_HOST=0.0.0.0"
@@ -54,6 +61,7 @@ echo [FmlySys] Repository root: %REPO_ROOT%
 echo [FmlySys] HTTP_PROXY=%HTTP_PROXY%
 echo [FmlySys] HTTPS_PROXY=%HTTPS_PROXY%
 echo [FmlySys] ALL_PROXY=%ALL_PROXY%
+echo [FmlySys] GOPROXY="%GOPROXY%"
 echo [FmlySys] Bind host: %FMLYSYS_BIND_HOST%
 echo [FmlySys] Port: %FMLYSYS_PORT%
 echo [FmlySys] Local URL: http://localhost:%FMLYSYS_PORT%/
@@ -106,13 +114,15 @@ goto :fail
 :tidy_failed
 echo.
 echo [FmlySys] go mod tidy failed.
-echo [FmlySys] Check that the local proxy is running and the proxy ports are correct.
+echo [FmlySys] Check the error above: local proxy, module source, TLS, or checksum service may have failed.
+echo [FmlySys] Module sources: "%GOPROXY%"
 goto :fail
 
 :download_failed
 echo.
 echo [FmlySys] Failed to download Go module dependencies.
-echo [FmlySys] Check that the local proxy is running and the proxy ports are correct.
+echo [FmlySys] Check the error above: local proxy, module source, TLS, or checksum service may have failed.
+echo [FmlySys] Module sources: "%GOPROXY%"
 goto :fail
 
 :verify_failed
