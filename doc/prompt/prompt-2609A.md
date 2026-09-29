@@ -161,6 +161,43 @@
 
 
 
+    我先检查当前分支、工作区改动和 /assets、首页快捷操作的实现位置，再在指定分支上完成入口、浮层、权限校验和开发日志。会保留现有未提交改动，也不会暂存或提交文件。
+
+    运行了命令
+
+    我确认了页面访问已经由 assets.view 权限中间件保护，首页的公共资产快捷区也只对有该权限的成员渲染。因此会沿用这条权限边界：时间线数据在服务端按有效记录分页，浮层入口和首页按钮由模板按权限显示，timeline URL 参数只负责打开浮层，不单独提供数据访问。
+
+    编辑了文件运行了命令
+
+    页面入口、首页跳转和受权限保护的服务端分页已经接上；时间线覆盖整个视口，分页继续以 /assets?timeline=1&page=… 打开浮层。现在我在补开发日志，并检查改动范围和分页、权限实现；按你的要求不会运行测试、暂存或提交。
+
+    编辑了文件运行了命令
+
+    实现已基本完成。我发现模板文件在修补时出现了行尾变化，已恢复为仓库原有格式，并确认首页只增加了目标按钮、资产页只替换了占位卡片并新增浮层。接下来做最后的源码与工作区检查，确保原有 go.mod、go.sum 改动仍原样保留。
+
+    编辑了文件运行了命令
+
+    已在 `dev-2609A-step1` 完成财务时间线：`/assets` 的入口卡片会打开全屏浮层，首页快捷按钮会跳转到 `/assets` 并自动打开浮层。时间线汇总四类有效记录，按发生时间倒序排列，显示到秒，并默认每页 20 条。入口和数据都受现有 `assets.view` 权限保护。
+
+    实现与方案已记录在[开发日志](D:/Workspace/github/Ltre/FmlySys/doc/devlog/devlog-2609-features.md)。后端分页查询位于[financial_timeline.go](D:/Workspace/github/Ltre/FmlySys/internal/store/financial_timeline.go)，页面入口和浮层位于[assets.html](D:/Workspace/github/Ltre/FmlySys/web/templates/assets.html)。
+
+    已执行 `gofmt` 和 `git diff --check`；按要求未运行测试、未执行 `git add`，也未提交。原有 `go.mod` 和 `go.sum` 未提交改动已保留。
+
+    **Title**
+
+    ```text
+    feat: add permission-gated financial timeline
+    ```
+
+    **Description**
+
+    ```text
+    Add a full-screen timeline on /assets that merges public expenses, member transfers, reimbursements, and asset changes in occurrence-time descending order, with second-level localized timestamps and 20-entry pagination.
+
+    Expose the timeline from the assets card and dashboard quick actions, including direct links that open the overlay on arrival. Gate both entry points and timeline data through the existing assets.view permission and present records as tagged, color-coded activity cards.
+    ```
+
+
 
 问：
 
