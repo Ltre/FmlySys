@@ -46,41 +46,43 @@ type Server struct {
 }
 
 type view struct {
-	Title             string
-	ActivePartition   string
-	Summary           store.AssetSummary
-	CurrentMember     store.Member
-	CurrentBalance    int64
-	Permissions       map[string]bool
-	PermissionCatalog []store.PermissionDef
-	MemberPermissions map[int64]map[string]bool
-	Members           []store.Member
-	Expenses          []store.Expense
-	Expense           store.Expense
-	AssetEvents       []store.AssetEvent
-	AdminAssetEvents  []store.AssetEvent
-	AssetInflows      []store.AssetInflowOption
-	Transfers         []store.Transfer
-	Reimbursements    []store.Reimbursement
-	ExpenseAudits     []store.AuditLog
-	ExpenseRefunds    []store.Reimbursement
-	Matters           []store.Matter
-	Archives          []store.Archive
-	Archive           store.Archive
-	MedicationDate    string
-	MedicationPlans   []store.MedicationPlan
-	MedicationSummary store.MedicationSummary
-	AdminQuickNotes   []store.AdminQuickMoneyNote
-	PendingJoins      []store.JoinRequest
-	JoinRequest       store.JoinRequest
-	WeChatConfigured  bool
-	DevAuthEnabled    bool
-	AdminConfigured   bool
-	AdminUsername     string
-	TOTPSecret        string
-	TOTPURI           string
-	Error             string
-	Message           string
+	Title                 string
+	ActivePartition       string
+	Summary               store.AssetSummary
+	CurrentMember         store.Member
+	CurrentBalance        int64
+	Permissions           map[string]bool
+	PermissionCatalog     []store.PermissionDef
+	MemberPermissions     map[int64]map[string]bool
+	Members               []store.Member
+	Expenses              []store.Expense
+	Expense               store.Expense
+	AssetEvents           []store.AssetEvent
+	AdminAssetEvents      []store.AssetEvent
+	AssetInflows          []store.AssetInflowOption
+	Transfers             []store.Transfer
+	Reimbursements        []store.Reimbursement
+	FinancialTimeline     store.FinancialTimelinePage
+	OpenFinancialTimeline bool
+	ExpenseAudits         []store.AuditLog
+	ExpenseRefunds        []store.Reimbursement
+	Matters               []store.Matter
+	Archives              []store.Archive
+	Archive               store.Archive
+	MedicationDate        string
+	MedicationPlans       []store.MedicationPlan
+	MedicationSummary     store.MedicationSummary
+	AdminQuickNotes       []store.AdminQuickMoneyNote
+	PendingJoins          []store.JoinRequest
+	JoinRequest           store.JoinRequest
+	WeChatConfigured      bool
+	DevAuthEnabled        bool
+	AdminConfigured       bool
+	AdminUsername         string
+	TOTPSecret            string
+	TOTPURI               string
+	Error                 string
+	Message               string
 }
 
 func New(pm *partition.Manager, st *store.Store, admin *adminauth.Service, cfg config.Config, devActorID int64) (*Server, error) {
@@ -688,6 +690,14 @@ func (s *Server) assets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v.AssetEvents, _ = s.Store.AssetEvents(r.Context())
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	timeline, err := s.Store.FinancialTimeline(r.Context(), page, 20)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	v.FinancialTimeline = timeline
+	v.OpenFinancialTimeline = r.URL.Query().Get("timeline") == "1"
 	s.render(w, "assets.html", v)
 }
 

@@ -1,0 +1,140 @@
+#timeline-card { padding: 0; overflow: hidden; }
+.timeline-entry-link {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  min-height: 88px;
+  padding: 17px 20px;
+  color: inherit;
+  text-decoration: none;
+  transition: background-color .16s ease;
+}
+.timeline-entry-link:hover, .timeline-entry-link:focus-visible { background: #f8faff; }
+.timeline-entry-link:focus-visible { outline: 3px solid #9fc4f5; outline-offset: -3px; }
+.timeline-entry-icon {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: #edf4ff;
+  color: #1a73e8;
+  font-size: 25px;
+  font-weight: 700;
+}
+.timeline-entry-copy { display: grid; gap: 4px; }
+.timeline-entry-copy strong { font-size: 17px; }
+.timeline-entry-copy small { color: #73777f; font-size: 13px; }
+.timeline-entry-arrow { display: flex; gap: 8px; align-items: center; color: #5d6673; font-size: 13px; white-space: nowrap; }
+.timeline-entry-arrow b { color: #1a73e8; font-size: 17px; }
+
+.financial-timeline-overlay[hidden] { display: none !important; }
+.financial-timeline-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: auto;
+  background: #f6f7f9;
+  overscroll-behavior: contain;
+  animation: timeline-appear .18s ease-out;
+}
+body.financial-timeline-open { overflow: hidden; }
+.financial-timeline-shell { min-height: 100%; }
+.financial-timeline-header {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  min-height: 126px;
+  padding: 22px max(24px, calc((100vw - 900px) / 2));
+  border-bottom: 1px solid #e3e5e8;
+  background: rgba(255,255,255,.96);
+  backdrop-filter: blur(12px);
+}
+.financial-timeline-header h1 { margin: 5px 0 3px; font-size: 27px; }
+.financial-timeline-header p { margin: 0; color: #73777f; font-size: 13px; }
+.timeline-kicker { color: #65758b; font-size: 12px; letter-spacing: .04em; }
+.timeline-close {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid #e1e5eb;
+  border-radius: 50%;
+  background: #fff;
+  color: #4c5562;
+  font-size: 28px;
+  line-height: 1;
+}
+.timeline-close:hover { background: #f2f4f7; }
+.financial-timeline-body { width: min(900px, 100%); margin: 0 auto; padding: 26px 22px 40px; }
+.timeline-summary { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 18px; color: #73777f; font-size: 13px; }
+.timeline-list { list-style: none; margin: 0; padding: 0; }
+.timeline-item { position: relative; display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 0 14px; padding-bottom: 12px; }
+.timeline-item::before { content: ""; position: absolute; top: 34px; bottom: -1px; left: 17px; width: 2px; background: #e5e9ef; }
+.timeline-item:last-child::before { display: none; }
+.timeline-node {
+  z-index: 1;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 3px solid #f6f7f9;
+  border-radius: 50%;
+  background: #eaf1fb;
+  color: #416b9e;
+  font-size: 17px;
+  font-weight: 700;
+}
+.timeline-record { min-width: 0; padding: 15px 17px; border: 1px solid #e4e7eb; border-radius: 12px; background: #fff; box-shadow: 0 1px 2px rgba(24,39,75,.035); }
+.timeline-record-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 11px; }
+.timeline-tag { display: inline-flex; align-items: center; min-height: 24px; padding: 3px 9px; border-radius: 999px; background: #eef2f7; color: #485465; font-size: 12px; font-weight: 650; white-space: nowrap; }
+.timeline-expense .timeline-tag { background: #fff0ed; color: #a43e2d; }
+.timeline-transfer .timeline-tag { background: #eaf3ff; color: #2864a5; }
+.timeline-reimbursement .timeline-tag { background: #fff5df; color: #89630e; }
+.timeline-asset_event .timeline-tag { background: #eaf5ee; color: #307148; }
+.timeline-time { color: #73777f; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.timeline-record-main { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
+.timeline-record-copy { display: grid; min-width: 0; grid-template-columns: auto auto; justify-content: start; align-items: baseline; gap: 5px 9px; }
+.timeline-record-copy h2 { grid-column: 1 / -1; margin: 0; color: #202124; font-size: 16px; line-height: 1.4; }
+.timeline-subtype { color: #636d7b; font-size: 12px; }
+.timeline-person { color: #465160; font-size: 13px; font-weight: 600; }
+.timeline-record-copy p { grid-column: 1 / -1; margin: 2px 0 0; color: #73777f; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.timeline-amount { flex: 0 0 auto; color: #354052; font-size: 16px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.timeline-amount.is-negative { color: #a43e2d; }
+.timeline-amount.is-positive { color: #287347; }
+.timeline-empty { display: grid; justify-items: center; gap: 8px; padding: 70px 18px; border: 1px dashed #d8dde5; border-radius: 14px; background: rgba(255,255,255,.62); text-align: center; }
+.timeline-empty > span { color: #8190a3; font-size: 34px; }
+.timeline-empty strong { font-size: 16px; }
+.timeline-empty p { margin: 0; color: #73777f; font-size: 13px; }
+.timeline-pagination { display: flex; justify-content: center; align-items: center; gap: 16px; padding: 12px 0 0; color: #73777f; font-size: 13px; }
+.timeline-pagination .secondary-button { min-width: 104px; min-height: 40px; }
+.timeline-pagination .is-disabled { cursor: default; opacity: .45; }
+@keyframes timeline-appear { from { opacity: 0; } to { opacity: 1; } }
+
+@media (max-width: 560px) {
+  .timeline-entry-link { grid-template-columns: 42px minmax(0,1fr); gap: 11px; padding: 14px; }
+  .timeline-entry-icon { width: 42px; height: 42px; }
+  .timeline-entry-arrow { grid-column: 2; margin-top: -7px; }
+  .financial-timeline-header { min-height: 108px; padding: 15px 16px; }
+  .financial-timeline-header h1 { font-size: 23px; }
+  .financial-timeline-body { padding: 18px 12px 28px; }
+  .timeline-summary { align-items: flex-start; font-size: 12px; }
+  .timeline-item { grid-template-columns: 31px minmax(0,1fr); gap: 0 8px; }
+  .timeline-item::before { left: 14px; }
+  .timeline-node { width: 30px; height: 30px; font-size: 15px; }
+  .timeline-record { padding: 12px; }
+  .timeline-record-top { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .timeline-record-main { gap: 8px; }
+  .timeline-record-copy h2 { font-size: 15px; }
+  .timeline-amount { font-size: 14px; }
+  .timeline-pagination { gap: 8px; }
+  .timeline-pagination .secondary-button { min-width: 0; min-height: 40px; padding: 7px 9px; font-size: 12px; }
+}

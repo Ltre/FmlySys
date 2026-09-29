@@ -1,10 +1,42 @@
-{{define "assets.html"}}<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title><link rel="stylesheet" href="/static/app.css"></head><body>{{template "nav" .}}<main class="wrap">
+{{define "assets.html"}}<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title><link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/financial-timeline.css"></head><body>{{template "nav" .}}<main class="wrap">
 <h1>公共资产</h1><p class="muted">当前成员：<strong>{{.CurrentMember.Name}}</strong></p>
 <div class="grid"><section class="card"><div class="muted">公共财产净额</div><div class="metric">¥{{money .Summary.NetCent}}</div></section><section class="card"><div class="muted">我的代管余额</div><div class="metric">¥{{money .CurrentBalance}}</div></section><section class="card"><div class="muted">待报销</div><div class="metric">¥{{money .Summary.PendingCent}}</div></section></div>
 
 <section class="card" id="timeline-card">
-    <!-- @TODO: 此处待插入代码 -->
+    {{if hasPerm .Permissions "assets.view"}}<a class="timeline-entry-link" href="/assets?timeline=1" data-open-financial-timeline aria-haspopup="dialog" aria-controls="financial-timeline-modal">
+        <span class="timeline-entry-icon" aria-hidden="true">↗</span>
+        <span class="timeline-entry-copy"><strong>财务时间线</strong><small>按发生时间查看消费、转账、报销与资产变动</small></span>
+        <span class="timeline-entry-arrow" aria-hidden="true">查看时间线 <b>→</b></span>
+    </a>{{end}}
 </section>
+
+{{if hasPerm .Permissions "assets.view"}}<div class="financial-timeline-overlay" id="financial-timeline-modal" role="dialog" aria-modal="true" aria-labelledby="financial-timeline-title" {{if .OpenFinancialTimeline}}{{else}}hidden{{end}}>
+    <div class="financial-timeline-shell">
+        <header class="financial-timeline-header">
+            <div><span class="timeline-kicker">FmlySys · 公共资产</span><h1 id="financial-timeline-title">财务时间线</h1><p>四类账务记录按发生时间倒序排列</p></div>
+            <button class="timeline-close" type="button" data-close-financial-timeline aria-label="关闭财务时间线">×</button>
+        </header>
+        <div class="financial-timeline-body">
+            <div class="timeline-summary"><span>最近发生的账务动态</span><span>{{.FinancialTimeline.Start}}–{{.FinancialTimeline.End}} / 共 {{.FinancialTimeline.Total}} 条</span></div>
+            {{if .FinancialTimeline.Items}}<ol class="timeline-list">
+                {{range .FinancialTimeline.Items}}<li class="timeline-item timeline-{{.Kind}}">
+                    <span class="timeline-node" aria-hidden="true">{{.Icon}}</span>
+                    <article class="timeline-record">
+                        <div class="timeline-record-top"><span class="timeline-tag">{{.Tag}}</span><time class="timeline-time" datetime="{{.OccurredAt}}" data-fmly-datetime="{{.OccurredAt}}">{{.OccurredAt}}</time></div>
+                        <div class="timeline-record-main"><div class="timeline-record-copy"><h2>{{.Title}}</h2>{{if .TypeLabel}}<span class="timeline-subtype">{{.TypeLabel}}</span>{{end}}{{if .Person}}<span class="timeline-person">{{.Person}}</span>{{end}}{{if .Detail}}<p>{{.Detail}}</p>{{end}}</div>
+                            <strong class="timeline-amount {{if eq .Sign "−"}}is-negative{{else if eq .Sign "+"}}is-positive{{end}}">{{.Sign}}¥{{money .AmountCent}}</strong>
+                        </div>
+                    </article>
+                </li>{{end}}
+            </ol>{{else}}<div class="timeline-empty"><span aria-hidden="true">◷</span><strong>还没有财务记录</strong><p>新增消费、转账、报销或资产变动后，会显示在这里。</p></div>{{end}}
+            <nav class="timeline-pagination" aria-label="财务时间线分页">
+                {{if .FinancialTimeline.HasPrevious}}<a class="secondary-button" href="/assets?timeline=1&amp;page={{.FinancialTimeline.PreviousPage}}">← 上一页</a>{{else}}<span class="secondary-button is-disabled" aria-disabled="true">← 上一页</span>{{end}}
+                <span>第 {{.FinancialTimeline.Page}} / {{.FinancialTimeline.Pages}} 页</span>
+                {{if .FinancialTimeline.HasNext}}<a class="secondary-button" href="/assets?timeline=1&amp;page={{.FinancialTimeline.NextPage}}">下一页 →</a>{{else}}<span class="secondary-button is-disabled" aria-disabled="true">下一页 →</span>{{end}}
+            </nav>
+        </div>
+    </div>
+</div>{{end}}
 
 <section class="card holders-card"><div class="section-head"><div><h2>公共资产持有人</h2><p class="muted">公开显示家族内部各成员当前代管的公共财产总额，不涉及其个人银行卡、微信或支付宝余额。</p></div>{{if hasPerm .Permissions "assets.self_change"}}<details class="corner-details" id="self-asset-change"><summary class="secondary-button">登记我的资产变动</summary><div class="fold-panel"><p class="muted">这里只登记公共资产流入你手中或退出共同资产体系；公共消费请使用下方“➕新增公共消费”。</p><form method="post" action="/assets/self-events" class="form" data-success="资产变动已登记" data-return-anchor="asset-movements"><div class="wide choice-row"><label class="choice"><input type="radio" name="event_type" value="ASSET_IN" checked><strong>资产新增</strong><span>增加我的代管金额</span></label><label class="choice"><input type="radio" name="event_type" value="ASSET_OUT"><strong>资产减少</strong><span>撤资 / 退回来源等</span></label></div><input name="amount" placeholder="金额，如 1000.00" required><input type="datetime-local" name="occurred_at"><input class="wide" name="description" placeholder="来源、退回对象或说明"><button>登记变动</button></form></div></details>{{end}}</div><table><tr><th>成员</th><th>当前代管公共资产</th></tr>{{range .Summary.Holders}}<tr><td>{{.Name}}</td><td class="money">¥{{money .Cent}}</td></tr>{{else}}<tr><td colspan="2">暂无公共资产持有人记录</td></tr>{{end}}</table></section>
 
@@ -31,4 +63,4 @@
   </div>
   <button type="button" class="floating-action-toggle" aria-expanded="false" aria-controls="member-assets-action-menu" title="拖动调整位置，点击展开快捷菜单"><span aria-hidden="true">＋</span><small>快捷</small></button>
 </div>
-</main></body></html>{{end}}
+</main><script src="/static/financial-timeline.js" defer></script></body></html>{{end}}

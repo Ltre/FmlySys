@@ -42,6 +42,28 @@ type Reimbursement struct {
 	PaymentChannel, OccurredAt, Note       string
 	Evidence                               []Evidence
 }
+
+type FinancialTimelineEntry struct {
+	Kind       string
+	Tag        string
+	TypeLabel  string
+	Title      string
+	Detail     string
+	Person     string
+	AmountCent int64
+	Sign       string
+	OccurredAt string
+	Icon       string
+}
+
+type FinancialTimelinePage struct {
+	Items                  []FinancialTimelineEntry
+	Page, PageSize, Pages  int
+	Total, Start, End      int
+	HasPrevious, HasNext   bool
+	PreviousPage, NextPage int
+}
+
 type Expense struct {
 	ID                                                 int64
 	Title, Category                                    string
