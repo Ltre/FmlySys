@@ -196,6 +196,64 @@
 
     Expose the timeline from the assets card and dashboard quick actions, including direct links that open the overlay on arrival. Gate both entry points and timeline data through the existing assets.view permission and present records as tagged, color-coded activity cards.
     ```
+    
+    
+【旧】问：
+
+    1、还需要在财务时间线浮层，的右上角关闭按钮的相邻左边，放置一个最小化按钮`_`。点击这个按钮后，会记住财务时间线最后浏览的分页和锚点。
+    
+    2、财务时间线的每个时间点，要支持点击后先将财务时间线浮层最小化，再跳转到对应的流水锚点。
+    
+    3、要在公共资产页的浮动快捷按钮打开的菜单（`#member-assets-action-menu`）中的第一个位置放置按钮`财务时间线`。
+
+
+
+【新】问：
+
+    1、在财务时间线浮层右上角的关闭按钮左侧，新增一个“最小化”按钮，按钮文字为 `_`。
+
+    点击“最小化”后，需要保留用户当前浏览状态，包括：
+
+    - 当前所在分页；
+    - 当前浏览位置或对应锚点。
+
+    下次重新打开财务时间线时，应恢复到上次最小化前的分页和浏览位置，而不是重新回到第一页顶部。
+
+    2、财务时间线中的每一条时间节点记录都需要支持点击。
+
+    点击某条记录后，应按以下流程执行：
+
+    - 先最小化财务时间线浮层，并保存当前分页及浏览位置；
+    - 再跳转到 `/assets` 页面中该记录对应的具体流水位置；
+    - 页面自动定位到对应流水锚点或具体记录，并保持现有的定位、高亮等交互效果。
+
+    不同类型的时间线记录应分别跳转到对应的流水区域，例如公共消费、成员转账、报销登记、资产变动等。
+
+    3、在公共资产页浮动快捷按钮展开的菜单 `#member-assets-action-menu` 中，将“财务时间线”按钮放在菜单的第一个位置。
+
+    点击该按钮后，直接打开财务时间线浮层，并恢复上一次保存的分页及浏览位置；如果此前没有保存过浏览状态，则默认从第一页最新记录开始显示。
+
+    开发要求：
+
+    - 在分支 `dev-2609A-step1` 上修改；
+    - 不要提交 Git commit；
+    - 不要执行 `git add`，即不要暂存任何文件；
+    - 推理过程、实现方案、修改内容及开发日志统一记录到：
+      `doc/devlog/devlog-2609-features.md`
+
+    完成开发后，还需要生成本次修改对应的 Git commit 文案，但不要实际提交。
+
+    Git log 文案需要分别提供：
+
+    **Title**
+
+    单独给出 commit title，方便直接复制。
+
+    **Description**
+
+    单独给出 commit description，详细概括本次功能修改，方便直接复制。
+
+    Title 和 Description 不要混在同一个代码块或同一段内容中，应分别展示，便于分别复制。
 
 
 
