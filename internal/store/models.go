@@ -44,6 +44,7 @@ type Reimbursement struct {
 }
 
 type FinancialTimelineEntry struct {
+	ID         int64
 	Kind       string
 	Tag        string
 	TypeLabel  string

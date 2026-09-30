@@ -42,3 +42,44 @@ Add a full-screen timeline on /assets that merges public expenses, member transf
 
 Expose the timeline from the assets card and dashboard quick actions, including direct links that open the overlay on arrival. Gate both entry points and timeline data through the existing assets.view permission and present records as tagged, color-coded activity cards.
 ```
+
+## 财务时间线交互续作
+
+日期：2026-09-30
+分支：`dev-2609A-step1`
+
+### 浏览状态与最小化
+
+在时间线标题栏关闭按钮左侧增加 `_` 最小化按钮。最小化时把当前页码、浮层滚动位置以及可见记录锚点和锚点相对视口偏移保存在当前标签页的 `sessionStorage`，隐藏浮层并清理打开参数。卡片和资产页快捷菜单重新打开时优先读取保存状态：若当前页已渲染对应页码则原位恢复；否则带保存页码重新加载；从首页打开的无页码链接也会在页面加载后恢复保存页码。
+
+关闭按钮、Esc 和背景点击保留原有关闭语义，不额外覆盖上次保存的位置；`_` 最小化按钮负责保存当前浏览位置。
+
+### 从动态记录跳转到流水
+
+每条时间线卡片及轴上的节点图标都可点击，链接携带记录类别与 ID。点击后先保存当前页和所选时间线节点的位置，再写入既有 `fmlyRecordFocus` 状态、隐藏浮层，随后导航到 `/assets#<类别>-record-<ID>`。消费、成员转账、报销登记和资产变动流水行分别增加对应 DOM 锚点和现有 `data-record-key`，由 `record-focus.js` 继续完成精确滚动与高亮。
+
+为确保时间线中的任意有效资产变动都有目标行，资产变动流水查询不再只取最新 100 条；其它三类流水此前已完整提供对应记录。
+
+资产页浮动快捷菜单现在把“财务时间线”放在第一项，并复用卡片入口的恢复逻辑。
+
+### 本轮改动与检查
+
+- 更新 `FinancialTimelineEntry` 和合并查询，向模板提供每条记录的 ID。
+- 更新 `financial-timeline.js`、`financial-timeline.css` 及资产页模板，加入最小化恢复、记录跳转和流水锚点。
+- 在 `#member-assets-action-menu` 首项加入受 `assets.view` 控制的财务时间线入口。
+- 移除 `Store.AssetEvents` 的 100 条 SQL 上限，使旧资产事件仍有可定位流水行。
+- 对 Go 文件执行 `gofmt`，并对已跟踪改动执行 `git diff --check`。未运行测试，未执行 `git add`，未提交。
+
+**Title**
+
+```text
+feat: add resumable financial timeline navigation
+```
+
+**Description**
+
+```text
+Add a minimize control that saves the current timeline page and reading position, then restores them when the timeline is reopened from the assets card or floating quick menu. Make timeline records clickable and route each one to its matching expense, transfer, reimbursement, or asset movement row, reusing the existing record focus and highlight behavior.
+
+Put the financial timeline first in the assets quick menu and ensure older asset movement records remain available as jump targets.
+```

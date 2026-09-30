@@ -3,7 +3,7 @@ package store
 import "context"
 
 const financialTimelineQuery = `
-SELECT kind,tag,type_label,title,detail,person,amount_cent,sign,occurred_at,icon
+SELECT kind,tag,type_label,title,detail,person,amount_cent,sign,occurred_at,icon,id
 FROM (
     SELECT 'expense' AS kind,'公共消费' AS tag,'' AS type_label,
         e.title AS title,
@@ -84,7 +84,7 @@ SELECT
 	result.Items = make([]FinancialTimelineEntry, 0, pageSize)
 	for rows.Next() {
 		var item FinancialTimelineEntry
-		if err := rows.Scan(&item.Kind, &item.Tag, &item.TypeLabel, &item.Title, &item.Detail, &item.Person, &item.AmountCent, &item.Sign, &item.OccurredAt, &item.Icon); err != nil {
+		if err := rows.Scan(&item.Kind, &item.Tag, &item.TypeLabel, &item.Title, &item.Detail, &item.Person, &item.AmountCent, &item.Sign, &item.OccurredAt, &item.Icon, &item.ID); err != nil {
 			return result, err
 		}
 		result.Items = append(result.Items, item)

@@ -366,7 +366,7 @@ func (s *Store) UpdateExpense(ctx context.Context, actor, id int64, in ExpenseUp
 }
 
 func (s *Store) AssetEvents(ctx context.Context) ([]AssetEvent, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT e.id,e.event_type,e.amount_cent,m.name,e.description,e.occurred_at FROM asset_events e JOIN members m ON m.id=e.holder_member_id WHERE e.status='active' ORDER BY e.occurred_at DESC,e.id DESC LIMIT 100`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT e.id,e.event_type,e.amount_cent,m.name,e.description,e.occurred_at FROM asset_events e JOIN members m ON m.id=e.holder_member_id WHERE e.status='active' ORDER BY e.occurred_at DESC,e.id DESC`)
 	if err != nil {
 		return nil, err
 	}

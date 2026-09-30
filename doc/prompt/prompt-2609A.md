@@ -257,6 +257,37 @@
 
 
 
+答：
+
+
+    我会在现有时间线交互上加“最小化并恢复”状态，再复用资产页已有的记录定位逻辑，让每种记录都跳到对应流水。先检查当前实现和记录锚点格式，保证工作区里的现有改动不被覆盖。
+
+    编辑了文件运行了命令
+
+    现在每条时间线记录都带有对应流水行的锚点，并写入现有的 fmlyRecordFocus，因此跳转后可复用已有的定位和高亮效果。最小化状态会保存在当前浏览器标签页会话中；菜单或首页重新打开时会按保存页码加载，再恢复记录锚点及滚动偏移。
+
+    编辑了文件运行了命令
+
+    已完成修改：财务时间线的 `_` 按钮会保存当前页码和浏览位置；从资产卡片、首页入口或浮动快捷菜单重新打开时，会恢复已保存的位置。时间线卡片和节点图标都可点击，能跳到对应的消费、转账、报销或资产变动流水，并复用已有的定位和高亮效果。“财务时间线”也已放到资产页浮动菜单首项。
+
+    实现记录已补充到[开发日志](D:/Workspace/github/Ltre/FmlySys/doc/devlog/devlog-2609-features.md)。修改位于分支 `dev-2609A-step1`；`gofmt` 和 `git diff --check` 已执行，未运行测试。**没有暂存或提交**；原有 `go.mod`、`go.sum` 改动已保留。
+
+    **Title**
+
+    ```text
+    feat: make financial timeline resumable and actionable
+    ```
+
+    **Description**
+
+    ```text
+    Save the financial timeline page and reading position when minimized, and restore them when reopened from the assets card or quick menu. Make each timeline record and node link to its matching asset row, reusing the existing record focus and highlight behavior.
+
+    Put the financial timeline first in the assets quick menu and keep older asset movement rows available as jump targets.
+    ```
+
+
+
 问：
 
 
