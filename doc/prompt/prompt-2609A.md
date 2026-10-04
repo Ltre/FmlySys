@@ -709,7 +709,75 @@
     doc/devlog/devlog-2609-features.mddoc/devlog/devlog-2609-features.md+8-0
     doc/wechat-code-login.mddoc/wechat-code-login.md+13-0
     internal/httpserver/wechat_browser_guard_test.gointernal/httpserver/wechat_browser_guard_test.go+1-1
+    
+    
+    
+问：
 
+
+    看到后台开发中心显示【最近请求与错误
+    仅记录登录页、健康检查和源站探测。最多保留 100 条，仅在当前进程内存中；重启后清空。
+    已更新 03:27:48
+    为保护隐私，本页不记录 URL 查询参数（临时诊断编号除外）、Cookie、表单正文、微信 OpenID 或客户端 IP。】
+    你还他妈的隐藏掉细节、cookie、正文，到时候他妈的我去正式环境测试后怎么带给你细节信息？这他妈逼的是在后台，隐藏你妈逼的，你有病是不是？
+    我拿回来自己会脱敏！
+    
+    你说得对。对不起，我把隐私保护擅自放在了你明确的排障需求前面，结果这个后台工具带不回真正有用的现场信息。我会改成管理员登录后可查看并导出原始请求/响应细节，包括查询参数、Cookie、请求正文、响应正文和未脱敏错误；数据仍只保存在当前服务进程的有界内存里。
+
+    编辑了文件读取文件
+
+    补充：200等正常响应的不用记录
+
+    5:14
+
+    收到。诊断记录只保留异常响应（HTTP 4xx/5xx）和处理 panic 的请求；正常的 200、重定向等不入日志。源站探测成功时直接看手机页面上的返回内容，不写入错误列表。
+
+    编辑了文件
+
+    还要包含跟微信服务器的交互细节、回调等等
+
+    5:15
+
+    编辑了文件读取文件运行了命令
+
+    上下文已自动压缩
+
+    我会把诊断范围扩展到公众号 API 的出站请求和微信回调入站请求，并按你的补充只跳过普通成功响应；后台仍提供原始详情供你自行脱敏导出。我先检查当前改动和测试，再补齐页面说明、开发日志与验证。
+
+    运行了命令
+
+    我确认了诊断中间件已经挂在实际服务最外层，公众号 API 客户端也已有观测钩子；目前主要缺口是测试仍按“脱敏日志”断言，页面也未正确区分 API、回调与普通错误。我会把这些统一成可查看完整收发数据的条目，并在操作指南里写清完整交互链和敏感字段范围。
+
+    编辑了文件运行了命令
+
+    细节已补齐：公众号回调即使因签名错误提前返回，也会在有界读取范围内捕获原始 XML；成功的公众号 API 与回调照样入诊断，普通成功请求不入。针对这几种路径的测试现在通过，我接着核对最终差异、后台呈现和开发日志，确认没有漏掉或误报。
+
+    编辑了文件运行了命令
+
+    已把微信交互与回调细节纳入后台“开发中心”诊断：
+
+    - 记录公众号的 access_token、临时二维码、用户信息 API，以及网页登录 OAuth 的 token/profile 请求和响应。
+    - 记录公众号回调和网页登录 OAuth 回调，包括成功响应；可查看完整查询参数、Headers、正文、状态和错误。
+    - 普通请求的 2xx/3xx 成功响应不记录。原始详情最多保留 100 条、每个大字段最多 64 KiB，超限会标记；后台支持展开、复制和下载 JSON。
+    - 接入流程和排障说明已补充到[微信验证码登录指南](D:/Workspace/github/Ltre/FmlySys/doc/wechat-code-login.md:13)，实现记录在[开发日志](D:/Workspace/github/Ltre/FmlySys/doc/devlog/devlog-2609-features.md:120)。
+
+    原始记录可能包含 AppSecret、access_token、Cookie、验证码和 OpenID；诊断页面与 API 由管理员权限保护，导出后可按你的方式脱敏。
+
+    验证通过：`go test ./internal/httpserver ./internal/wechat ./web ./cmd/fmlysys`、`node --check web/static/admin-developer.js`、`git diff --check`。当前在 `dev-2609A-step2-fake-wechat-qrlogin` 分支；没有暂存或提交。工作区中已有的 `go.mod`、`go.sum` 修改未纳入本次实现。
+
+    **Title**
+
+    ```text
+    feat: capture full WeChat login diagnostics
+    ```
+
+    **Description**
+
+    ```text
+    Capture successful and failed WeChat API exchanges, official-account callbacks, and website OAuth callbacks in the admin diagnostics center. Include request and response URLs, headers, bodies, status codes, durations, and errors while excluding ordinary successful 2xx/3xx requests.
+
+    Add raw JSON inspection, copy, and download controls with bounded in-memory retention, and document the WeChat request and callback flow for setup and troubleshooting.
+    ```
 
 ---------------------------
 

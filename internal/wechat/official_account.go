@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -24,10 +25,31 @@ type OfficialAccountClient struct {
 	AppID     string
 	AppSecret string
 	HTTP      *http.Client
+	Observer  func(context.Context, HTTPExchangeTrace)
 
 	mu          sync.Mutex
 	accessToken string
 	tokenExpiry time.Time
+}
+
+const exchangeTraceLimit = 64 << 10
+
+type HTTPExchangeTrace struct {
+	At                       time.Time
+	Method                   string
+	URL                      string
+	RequestHeaders           http.Header
+	RequestHeadersTruncated  bool
+	RequestBody              string
+	RequestBodyTruncated     bool
+	Status                   int
+	ResponseHeaders          http.Header
+	ResponseHeadersTruncated bool
+	ResponseBody             string
+	ResponseBodyTruncated    bool
+	DurationMS               int64
+	Error                    string
+	ErrorTruncated           bool
 }
 
 type officialTokenResponse struct {
@@ -177,12 +199,32 @@ func (c *OfficialAccountClient) invalidateAccessToken(token string) {
 }
 
 func (c *OfficialAccountClient) doJSON(ctx context.Context, method, endpoint string, body []byte, out any) error {
+	started := time.Now()
+	trace := HTTPExchangeTrace{At: started.UTC(), Method: method, URL: endpoint}
+	if body != nil {
+		trace.RequestBody, trace.RequestBodyTruncated = traceBytes(body)
+	}
+	var req *http.Request
+	finish := func() {
+		trace.DurationMS = time.Since(started).Milliseconds()
+		if req != nil {
+			trace.URL = req.URL.String()
+			trace.RequestHeaders, trace.RequestHeadersTruncated = traceHeaders(req.Header)
+		}
+		if c.Observer != nil {
+			c.Observer(ctx, trace)
+		}
+	}
+
 	var requestBody io.Reader
 	if body != nil {
 		requestBody = bytes.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, requestBody)
+	var err error
+	req, err = http.NewRequestWithContext(ctx, method, endpoint, requestBody)
 	if err != nil {
+		trace.Error, trace.ErrorTruncated = traceString(err.Error())
+		finish()
 		return err
 	}
 	if body != nil {
@@ -194,26 +236,93 @@ func (c *OfficialAccountClient) doJSON(ctx context.Context, method, endpoint str
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		trace.Error, trace.ErrorTruncated = traceString(err.Error())
+		finish()
 		return fmt.Errorf("微信公众号接口请求失败：%w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("微信公众号接口 HTTP %d", resp.StatusCode)
+	trace.Status = resp.StatusCode
+	trace.ResponseHeaders, trace.ResponseHeadersTruncated = traceHeaders(resp.Header)
+	responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+	if len(responseBody) > 1<<20 {
+		responseBody = responseBody[:1<<20]
+		trace.ResponseBodyTruncated = true
 	}
-	decoder := json.NewDecoder(io.LimitReader(resp.Body, 1<<20))
+	var bodyTruncated bool
+	trace.ResponseBody, bodyTruncated = traceBytes(responseBody)
+	trace.ResponseBodyTruncated = trace.ResponseBodyTruncated || bodyTruncated
+	if readErr != nil {
+		trace.Error, trace.ErrorTruncated = traceString(readErr.Error())
+		finish()
+		return fmt.Errorf("微信公众号接口响应读取失败：%w", readErr)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		err := fmt.Errorf("微信公众号接口 HTTP %d", resp.StatusCode)
+		trace.Error, trace.ErrorTruncated = traceString(err.Error())
+		finish()
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(responseBody))
 	if err := decoder.Decode(out); err != nil {
+		trace.Error, trace.ErrorTruncated = traceString(err.Error())
+		finish()
 		return fmt.Errorf("微信公众号接口响应解析失败：%w", err)
 	}
 	if apiErr := errorFromResponse(out); apiErr != nil {
+		trace.Error, trace.ErrorTruncated = traceString(apiErr.Error())
+		finish()
 		return apiErr
 	}
+	finish()
 	return nil
+}
+
+func traceBytes(value []byte) (string, bool) {
+	if len(value) <= exchangeTraceLimit {
+		return string(value), false
+	}
+	return string(value[:exchangeTraceLimit]), true
+}
+
+func traceString(value string) (string, bool) {
+	if len(value) <= exchangeTraceLimit {
+		return value, false
+	}
+	return value[:exchangeTraceLimit], true
+}
+
+func traceHeaders(headers http.Header) (http.Header, bool) {
+	result := make(http.Header)
+	keys := make([]string, 0, len(headers))
+	for key := range headers {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	remaining := exchangeTraceLimit
+	for _, key := range keys {
+		for _, value := range headers[key] {
+			cost := len(key) + len(value)
+			if cost > remaining {
+				if remaining > len(key) {
+					result.Add(key, value[:remaining-len(key)])
+				}
+				return result, true
+			}
+			result.Add(key, value)
+			remaining -= cost
+		}
+	}
+	return result, false
 }
 
 func errorFromResponse(value any) error {
 	var code int
 	var message string
 	switch response := value.(type) {
+	case *tokenResponse:
+		code, message = response.ErrCode, response.ErrMsg
+	case *userInfoResponse:
+		code, message = response.ErrCode, response.ErrMsg
 	case *officialTokenResponse:
 		code, message = response.ErrCode, response.ErrMsg
 	case *officialQRCodeResponse:

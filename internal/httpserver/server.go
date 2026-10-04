@@ -121,6 +121,7 @@ func New(pm *partition.Manager, st *store.Store, admin *adminauth.Service, cfg c
 	s := &Server{PM: pm, Store: st, Admin: admin, Config: cfg, DevActorID: devActorID, Templates: t, mux: http.NewServeMux()}
 	if cfg.WeChatCodeLoginConfigured() {
 		s.wechatOA = wechat.NewOfficialAccount(cfg.WeChatOAAppID, cfg.WeChatOAAppSecret)
+		s.wechatOA.Observer = s.recordWechatExchange
 	}
 	s.routes()
 	return s, nil
@@ -377,6 +378,7 @@ func (s *Server) wechatLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	setCookie(w, r, "fmly_wechat_state", state, WeChatCallbackPath, 600)
 	client := wechat.New(s.Config.WeChatAppID, s.Config.WeChatAppSecret)
+	client.Observer = s.recordWechatExchange
 	http.Redirect(w, r, client.LoginURL(state, callbackURL), http.StatusFound)
 }
 
@@ -389,6 +391,7 @@ func (s *Server) wechatCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client := wechat.New(s.Config.WeChatAppID, s.Config.WeChatAppSecret)
+	client.Observer = s.recordWechatExchange
 	profile, err := client.Profile(r.Context(), r.URL.Query().Get("code"))
 	if err != nil {
 		s.fail(w, r, err)

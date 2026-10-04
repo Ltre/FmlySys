@@ -15,7 +15,11 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { re
 
 func TestOfficialAccountQRCodeAndUnionIDReuseAccessToken(t *testing.T) {
 	tokenCalls := 0
+	var traces []HTTPExchangeTrace
 	client := NewOfficialAccount("oa-app", "oa-secret")
+	client.Observer = func(_ context.Context, trace HTTPExchangeTrace) {
+		traces = append(traces, trace)
+	}
 	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		var body string
 		switch req.URL.Path {
@@ -42,7 +46,10 @@ func TestOfficialAccountQRCodeAndUnionIDReuseAccessToken(t *testing.T) {
 		default:
 			t.Fatalf("unexpected URL %s", req.URL)
 		}
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header), Request: req}, nil
+		responseHeaders := make(http.Header)
+		responseHeaders.Set("Content-Type", "application/json")
+		responseHeaders.Set("X-WeChat-Trace", "wx-response")
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: responseHeaders, Request: req}, nil
 	})}
 
 	qrURL, err := client.TemporaryQRCode(context.Background(), "scene-token", 600)
@@ -59,5 +66,20 @@ func TestOfficialAccountQRCodeAndUnionIDReuseAccessToken(t *testing.T) {
 	}
 	if tokenCalls != 1 {
 		t.Fatalf("access token fetched %d times, want one", tokenCalls)
+	}
+	if len(traces) != 3 {
+		t.Fatalf("observed %d WeChat API exchanges, want token, QR, and user info", len(traces))
+	}
+	if !strings.Contains(traces[0].URL, "secret=oa-secret") || !strings.Contains(traces[0].ResponseBody, "cached-token") {
+		t.Fatalf("token exchange details were not captured: %+v", traces[0])
+	}
+	if traces[0].Status != http.StatusOK || traces[0].ResponseHeaders.Get("X-WeChat-Trace") != "wx-response" {
+		t.Fatalf("successful response status/headers missing: %+v", traces[0])
+	}
+	if !strings.Contains(traces[1].RequestBody, `"scene_str":"scene-token"`) || !strings.Contains(traces[1].URL, "access_token=cached-token") {
+		t.Fatalf("QR API request details were not captured: %+v", traces[1])
+	}
+	if !strings.Contains(traces[2].URL, "openid=oa-openid") || !strings.Contains(traces[2].ResponseBody, "shared-union") {
+		t.Fatalf("user info API details were not captured: %+v", traces[2])
 	}
 }

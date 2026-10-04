@@ -103,6 +103,57 @@
   line-height: 1.6;
 }
 
+.dev-log-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dev-sensitive-notice {
+  margin: 12px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid #f0d69a;
+  border-radius: 10px;
+  background: #fff9e9;
+  color: #634d1d;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.diag-error-message {
+  margin: 0 0 8px;
+  color: #a72c24;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.diag-kind-wechat {
+  background: #e7f5ed;
+  color: #246b43;
+}
+
+.diagnostic-table details > summary {
+  max-width: 520px;
+  color: #345d90;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.diagnostic-table pre.diag-raw-details {
+  max-height: 440px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 8px;
+  background: #f4f6f8;
+  color: #283443;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .diagnostic-table-wrap {
   overflow: auto;
   border: 1px solid #e2e7ee;
@@ -202,6 +253,10 @@
   .dev-log-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .dev-log-tools {
+    justify-content: flex-start;
   }
 
   .probe-actions {

@@ -119,8 +119,12 @@ Put the financial timeline first in the assets quick menu and ensure older asset
 
 ### 微信验证码登录 502 手机诊断
 
-用户反馈线上 `/login/wechat-code` 仍显示 Bad Gateway，因此增加管理员专用的 `/admin/developer` 诊断页。后台提供关联临时编号的源站探测和登录页测试链接，并展示当前进程捕获的最近 100 条相关请求；日志限制在 `/login/wechat-code`、`/healthz` 和 `/__diag/ping`，仅存进程内存。记录方法、路径（不含查询参数）、状态码、耗时、User-Agent、Host、代理协议及 Cloudflare Ray ID，不采集 Cookie、表单、客户端 IP 或微信身份。
+用户反馈线上 `/login/wechat-code` 仍显示 Bad Gateway，因此增加管理员专用的 `/admin/developer` 诊断页。后台提供关联临时编号的源站探测和登录页测试链接，并展示当前进程捕获的最近 100 条异常请求；日志限制在微信登录页/提交/回调、健康检查和源站探测路径，仅存进程内存。用户进一步要求保留原始排障细节，因此记录失败请求的完整查询参数、Headers（含 Cookie）、正文、远端地址、响应正文及未脱敏错误，便于管理员导出后自行脱敏；正常 200 和重定向等响应不记录。
 
-新增 `/__diag/ping` 只读探测响应，并在微信浏览器保护中允许此路径通过。二维码生成失败时记录脱敏后的网络错误、HTTP 状态或微信平台错误码，避免把含 `secret` / `access_token` 的 URL 写入可查看日志。这样可区分“Go 服务已收到并返回 502”与“当前进程没有请求记录”；后者通常是请求未到源站，但也要排除服务重启或多实例下查看了另一实例。Cloudflare/WAF/反向代理边缘日志仍须在对应平台查看，应用无法读取未到源站的请求。
+新增 `/__diag/ping` 只读探测响应，并在微信浏览器保护中允许此路径通过。二维码生成失败时完整记录原始错误，因此诊断日志可能包含 access_token 等敏感值，并由管理员权限保护。该工具帮助识别 Go 服务返回的 4xx/5xx；未到源站的错误仍须在 Cloudflare/WAF/反向代理平台查看。无记录时还需排除服务重启或多实例切换。
 
-验证：`go test ./internal/httpserver ./web ./cmd/fmlysys` 通过，`node --check web/static/admin-developer.js` 通过，针对本次已跟踪文件的 `git diff --check` 通过。诊断日志与 API 由管理员会话保护；未暂存、未提交。
+按用户补充，普通路径的 200 等 2xx/3xx 正常结果不写入记录；公众号回调和出站微信 API 作为专门的诊断类型，即使返回 200 也完整记录。出站 trace 覆盖公众号 access_token、临时二维码、公众号用户信息，以及原有网页登录 OAuth 的 token/profile 请求及其 URL、Headers、正文、响应、耗时和错误；入站 callback 覆盖 OAuth 回调、公众号 GET 验证与 POST 事件/文本消息，包括原始 query、Headers、XML 请求及 FmlySys 返回的 XML/文本正文。这样可以通过二维码 API 正文中的 scene 与回调 XML EventKey 对照，并检查 FromUserName、文本“登录”和验证码回复内容。
+
+后台表格按“微信 API”“微信回调”“HTTP 错误”“服务异常”“登录错误”区分，单条可展开原始详情，支持复制或下载 JSON。每个 Headers 集合、请求/响应正文和错误字符串最多保留 64 KiB，超限标记截断；最多 100 条，保存在进程内存。明文可能包含 AppSecret、access_token、Cookie、验证码、OpenID 及客户端代理信息，供管理员自行导出脱敏。诊断页与 JSON 接口仍由 adminOnly 保护。
+
+验证：`go test ./internal/httpserver ./internal/wechat ./web ./cmd/fmlysys` 通过；覆盖原始请求/响应和错误内容、公众号及 OAuth 成功回调、普通成功 ping 的排除，以及公众号和网页登录 OAuth API exchange trace。`node --check web/static/admin-developer.js` 和 `git diff --check` 通过。诊断日志与 API 由管理员会话保护；未暂存、未提交。

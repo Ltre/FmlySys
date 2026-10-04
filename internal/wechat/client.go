@@ -1,10 +1,12 @@
 package wechat
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -20,6 +22,7 @@ type Client struct {
 	AppID     string
 	AppSecret string
 	HTTP      *http.Client
+	Observer  func(context.Context, HTTPExchangeTrace)
 }
 
 type Profile struct {
@@ -97,20 +100,65 @@ func (c *Client) Profile(ctx context.Context, code string) (Profile, error) {
 }
 
 func (c *Client) getJSON(ctx context.Context, endpoint string, out any) error {
+	started := time.Now()
+	trace := HTTPExchangeTrace{At: started.UTC(), Method: http.MethodGet, URL: endpoint}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
+		trace.Error, trace.ErrorTruncated = traceString(err.Error())
+		c.observeExchange(ctx, started, req, &trace)
 		return err
 	}
-	resp, err := c.HTTP.Do(req)
+	httpClient := c.HTTP
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
+		trace.Error, trace.ErrorTruncated = traceString(err.Error())
+		c.observeExchange(ctx, started, req, &trace)
 		return fmt.Errorf("微信接口请求失败：%w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("微信接口 HTTP %d", resp.StatusCode)
+	trace.Status = resp.StatusCode
+	trace.ResponseHeaders, trace.ResponseHeadersTruncated = traceHeaders(resp.Header)
+	responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+	if len(responseBody) > 1<<20 {
+		responseBody = responseBody[:1<<20]
+		trace.ResponseBodyTruncated = true
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	var bodyTruncated bool
+	trace.ResponseBody, bodyTruncated = traceBytes(responseBody)
+	trace.ResponseBodyTruncated = trace.ResponseBodyTruncated || bodyTruncated
+	if readErr != nil {
+		trace.Error, trace.ErrorTruncated = traceString(readErr.Error())
+		c.observeExchange(ctx, started, req, &trace)
+		return fmt.Errorf("微信接口响应读取失败：%w", readErr)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		err := fmt.Errorf("微信接口 HTTP %d", resp.StatusCode)
+		trace.Error, trace.ErrorTruncated = traceString(err.Error())
+		c.observeExchange(ctx, started, req, &trace)
+		return err
+	}
+	if err := json.NewDecoder(bytes.NewReader(responseBody)).Decode(out); err != nil {
+		trace.Error, trace.ErrorTruncated = traceString(err.Error())
+		c.observeExchange(ctx, started, req, &trace)
 		return fmt.Errorf("微信接口响应解析失败：%w", err)
 	}
+	if apiErr := errorFromResponse(out); apiErr != nil {
+		trace.Error, trace.ErrorTruncated = traceString(apiErr.Error())
+	}
+	c.observeExchange(ctx, started, req, &trace)
 	return nil
+}
+
+func (c *Client) observeExchange(ctx context.Context, started time.Time, req *http.Request, trace *HTTPExchangeTrace) {
+	trace.DurationMS = time.Since(started).Milliseconds()
+	if req != nil {
+		trace.URL = req.URL.String()
+		trace.RequestHeaders, trace.RequestHeadersTruncated = traceHeaders(req.Header)
+	}
+	if c.Observer != nil {
+		c.Observer(ctx, *trace)
+	}
 }
