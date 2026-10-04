@@ -69,21 +69,25 @@ func (s *Server) wechatCodeLoginPage(w http.ResponseWriter, r *http.Request) {
 	}
 	state, err := randomToken()
 	if err != nil {
+		s.recordWechatCodeLoginProblem(r, err, "生成登录状态失败；请检查服务器随机数源。")
 		s.wechatCodeLoginUnavailable(w, v)
 		return
 	}
 	scene, err := randomToken()
 	if err != nil {
+		s.recordWechatCodeLoginProblem(r, err, "生成二维码场景值失败；请检查服务器随机数源。")
 		s.wechatCodeLoginUnavailable(w, v)
 		return
 	}
 	qrURL, err := s.wechatOA.TemporaryQRCode(r.Context(), scene, int(wechatCodeSceneTTL.Seconds()))
 	if err != nil {
+		s.recordWechatCodeLoginProblem(r, err, "公众号二维码接口失败；请核对公众号配置和接口权限。")
 		s.wechatCodeLoginUnavailable(w, v)
 		return
 	}
 	expires := time.Now().UTC().Add(wechatCodeSceneTTL)
 	if err := s.Store.CreateWeChatCodeLoginAttempt(r.Context(), wechatTokenHash(state), wechatTokenHash(scene), expires); err != nil {
+		s.recordWechatCodeLoginProblem(r, err, "保存二维码登录状态失败；请检查数据库状态和磁盘空间。")
 		s.wechatCodeLoginUnavailable(w, v)
 		return
 	}

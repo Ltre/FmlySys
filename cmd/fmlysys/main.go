@@ -88,6 +88,7 @@ func main() {
 	handler = httpserver.WithAsyncMultipartFormCompatibility(handler)
 	handler = httpserver.WithEnhancedFormResponses(handler)
 	handler = app.WithSuperAuditV2(handler)
+	handler = app.WithRequestDiagnostics(handler)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	go func() {

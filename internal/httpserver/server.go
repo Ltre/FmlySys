@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
@@ -36,14 +37,16 @@ const (
 )
 
 type Server struct {
-	PM         *partition.Manager
-	Store      *store.Store
-	Admin      *adminauth.Service
-	Config     config.Config
-	DevActorID int64
-	Templates  *template.Template
-	wechatOA   *wechat.OfficialAccountClient
-	mux        *http.ServeMux
+	PM           *partition.Manager
+	Store        *store.Store
+	Admin        *adminauth.Service
+	Config       config.Config
+	DevActorID   int64
+	Templates    *template.Template
+	wechatOA     *wechat.OfficialAccountClient
+	mux          *http.ServeMux
+	diagnosticMu sync.RWMutex
+	diagnostics  []requestDiagnosticEntry
 }
 
 type view struct {
@@ -140,6 +143,7 @@ func (s *Server) routes() {
 	staticFS, _ := fs.Sub(webassets.FS, "static")
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ok\n")) })
+	s.mux.HandleFunc("GET /__diag/ping", s.diagnosticPing)
 
 	// Member authentication and join request flow.
 	s.mux.HandleFunc("GET /login", s.loginPage)

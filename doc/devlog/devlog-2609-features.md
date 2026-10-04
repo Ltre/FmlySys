@@ -116,3 +116,11 @@ Put the financial timeline first in the assets quick menu and ensure older asset
 撤销探针后运行 `go test ./internal/httpserver ./web` 均通过，`git diff --check` 通过。保留 `/login/wechat-code` 路由注册测试；未暂存、未提交。
 
 另核对线上 `/login/wechat-code` 异常：当前 `server.go` 明确注册 `GET /login/wechat-code`，因此 502 与 `Cannot GET` 并非此 handler 的应用响应。前者需检查 Cloudflare 到源站的连通与源站进程，后者表示请求到达未包含该路由的旧/不同服务或代理目标。保留路由注册测试，并将区分步骤补充到接入指南；无法在没有线上域名和部署访问权限的情况下验证具体源站状态。
+
+### 微信验证码登录 502 手机诊断
+
+用户反馈线上 `/login/wechat-code` 仍显示 Bad Gateway，因此增加管理员专用的 `/admin/developer` 诊断页。后台提供关联临时编号的源站探测和登录页测试链接，并展示当前进程捕获的最近 100 条相关请求；日志限制在 `/login/wechat-code`、`/healthz` 和 `/__diag/ping`，仅存进程内存。记录方法、路径（不含查询参数）、状态码、耗时、User-Agent、Host、代理协议及 Cloudflare Ray ID，不采集 Cookie、表单、客户端 IP 或微信身份。
+
+新增 `/__diag/ping` 只读探测响应，并在微信浏览器保护中允许此路径通过。二维码生成失败时记录脱敏后的网络错误、HTTP 状态或微信平台错误码，避免把含 `secret` / `access_token` 的 URL 写入可查看日志。这样可区分“Go 服务已收到并返回 502”与“当前进程没有请求记录”；后者通常是请求未到源站，但也要排除服务重启或多实例下查看了另一实例。Cloudflare/WAF/反向代理边缘日志仍须在对应平台查看，应用无法读取未到源站的请求。
+
+验证：`go test ./internal/httpserver ./web ./cmd/fmlysys` 通过，`node --check web/static/admin-developer.js` 通过，针对本次已跟踪文件的 `git diff --check` 通过。诊断日志与 API 由管理员会话保护；未暂存、未提交。

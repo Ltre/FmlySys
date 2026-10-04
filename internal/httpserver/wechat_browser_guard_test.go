@@ -42,7 +42,7 @@ func TestWeChatBrowserGuardAllowsNormalBrowsersAndStaticAssets(t *testing.T) {
 	for _, tc := range []struct {
 		path string
 		ua   string
-	}{{"/", "Mozilla/5.0 Safari/605.1"}, {"/static/app.css", "MicroMessenger/8.0"}, {"/healthz", "MicroMessenger/8.0"}} {
+	}{{"/", "Mozilla/5.0 Safari/605.1"}, {"/static/app.css", "MicroMessenger/8.0"}, {"/healthz", "MicroMessenger/8.0"}, {"/__diag/ping", "MicroMessenger/8.0"}} {
 		called := false
 		handler := WithWeChatBrowserGuard(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			called = true
