@@ -48,6 +48,7 @@ type HTTPExchangeTrace struct {
 	ResponseBody             string
 	ResponseBodyTruncated    bool
 	DurationMS               int64
+	Network                  HTTPNetworkTrace
 	Error                    string
 	ErrorTruncated           bool
 }
@@ -205,11 +206,15 @@ func (c *OfficialAccountClient) doJSON(ctx context.Context, method, endpoint str
 		trace.RequestBody, trace.RequestBodyTruncated = traceBytes(body)
 	}
 	var req *http.Request
+	var networkSnapshot func() HTTPNetworkTrace
 	finish := func() {
 		trace.DurationMS = time.Since(started).Milliseconds()
 		if req != nil {
 			trace.URL = req.URL.String()
 			trace.RequestHeaders, trace.RequestHeadersTruncated = traceHeaders(req.Header)
+		}
+		if networkSnapshot != nil {
+			trace.Network = networkSnapshot()
 		}
 		if c.Observer != nil {
 			c.Observer(ctx, trace)
@@ -234,6 +239,7 @@ func (c *OfficialAccountClient) doJSON(ctx context.Context, method, endpoint str
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+	req, networkSnapshot = traceRequestNetwork(req, httpClient)
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		trace.Error, trace.ErrorTruncated = traceString(err.Error())

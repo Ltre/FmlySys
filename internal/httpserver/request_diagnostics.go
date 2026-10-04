@@ -23,32 +23,33 @@ const (
 var diagnosticIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 type requestDiagnosticEntry struct {
-	At                       time.Time   `json:"at"`
-	Kind                     string      `json:"kind"`
-	Method                   string      `json:"method"`
-	Path                     string      `json:"path"`
-	URL                      string      `json:"url,omitempty"`
-	URLTruncated             bool        `json:"url_truncated,omitempty"`
-	Query                    string      `json:"query,omitempty"`
-	QueryTruncated           bool        `json:"query_truncated,omitempty"`
-	Status                   int         `json:"status"`
-	DurationMS               int64       `json:"duration_ms"`
-	ProbeID                  string      `json:"probe_id,omitempty"`
-	Host                     string      `json:"host,omitempty"`
-	RemoteAddr               string      `json:"remote_addr,omitempty"`
-	Proto                    string      `json:"proto,omitempty"`
-	Cloudflare               string      `json:"cloudflare_ray,omitempty"`
-	UserAgent                string      `json:"user_agent,omitempty"`
-	RequestHeaders           http.Header `json:"request_headers,omitempty"`
-	RequestHeadersTruncated  bool        `json:"request_headers_truncated,omitempty"`
-	RequestBody              string      `json:"request_body,omitempty"`
-	RequestBodyTruncated     bool        `json:"request_body_truncated,omitempty"`
-	ResponseHeaders          http.Header `json:"response_headers,omitempty"`
-	ResponseHeadersTruncated bool        `json:"response_headers_truncated,omitempty"`
-	ResponseBody             string      `json:"response_body,omitempty"`
-	ResponseBodyTruncated    bool        `json:"response_body_truncated,omitempty"`
-	Message                  string      `json:"message,omitempty"`
-	MessageTruncated         bool        `json:"message_truncated,omitempty"`
+	At                       time.Time                `json:"at"`
+	Kind                     string                   `json:"kind"`
+	Method                   string                   `json:"method"`
+	Path                     string                   `json:"path"`
+	URL                      string                   `json:"url,omitempty"`
+	URLTruncated             bool                     `json:"url_truncated,omitempty"`
+	Query                    string                   `json:"query,omitempty"`
+	QueryTruncated           bool                     `json:"query_truncated,omitempty"`
+	Status                   int                      `json:"status"`
+	DurationMS               int64                    `json:"duration_ms"`
+	ProbeID                  string                   `json:"probe_id,omitempty"`
+	Host                     string                   `json:"host,omitempty"`
+	RemoteAddr               string                   `json:"remote_addr,omitempty"`
+	Proto                    string                   `json:"proto,omitempty"`
+	Cloudflare               string                   `json:"cloudflare_ray,omitempty"`
+	UserAgent                string                   `json:"user_agent,omitempty"`
+	RequestHeaders           http.Header              `json:"request_headers,omitempty"`
+	RequestHeadersTruncated  bool                     `json:"request_headers_truncated,omitempty"`
+	RequestBody              string                   `json:"request_body,omitempty"`
+	RequestBodyTruncated     bool                     `json:"request_body_truncated,omitempty"`
+	ResponseHeaders          http.Header              `json:"response_headers,omitempty"`
+	ResponseHeadersTruncated bool                     `json:"response_headers_truncated,omitempty"`
+	ResponseBody             string                   `json:"response_body,omitempty"`
+	ResponseBodyTruncated    bool                     `json:"response_body_truncated,omitempty"`
+	Network                  *wechat.HTTPNetworkTrace `json:"network,omitempty"`
+	Message                  string                   `json:"message,omitempty"`
+	MessageTruncated         bool                     `json:"message_truncated,omitempty"`
 }
 
 type diagnosticPageView struct {
@@ -328,6 +329,7 @@ func (s *Server) recordWechatExchange(ctx context.Context, trace wechat.HTTPExch
 		RequestBody: trace.RequestBody, RequestBodyTruncated: trace.RequestBodyTruncated,
 		ResponseHeaders: trace.ResponseHeaders, ResponseHeadersTruncated: trace.ResponseHeadersTruncated,
 		ResponseBody: trace.ResponseBody, ResponseBodyTruncated: trace.ResponseBodyTruncated,
+		Network: &trace.Network,
 		Message: trace.Error, MessageTruncated: trace.ErrorTruncated,
 	})
 }

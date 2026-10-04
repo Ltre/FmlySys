@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -25,6 +26,33 @@ func TestLoginURLUsesRuntimeRedirectURL(t *testing.T) {
 	}
 	if q.Get("scope") != "snsapi_login" || q.Get("state") != "state-123" {
 		t.Fatalf("unexpected OAuth query %v", q)
+	}
+}
+
+func TestTraceRequestNetworkCapturesSocketAddresses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer server.Close()
+
+	client := &http.Client{}
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, snapshot := traceRequestNetwork(request, client)
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+
+	trace := snapshot()
+	if trace.LocalAddress == "" || trace.RemoteAddress == "" {
+		t.Fatalf("socket addresses were not captured: %+v", trace)
+	}
+	if len(trace.Connects) == 0 || trace.Connects[0].Address == "" {
+		t.Fatalf("connect target was not captured: %+v", trace)
 	}
 }
 

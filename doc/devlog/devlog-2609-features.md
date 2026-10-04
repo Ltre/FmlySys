@@ -128,3 +128,11 @@ Put the financial timeline first in the assets quick menu and ensure older asset
 后台表格按“微信 API”“微信回调”“HTTP 错误”“服务异常”“登录错误”区分，单条可展开原始详情，支持复制或下载 JSON。每个 Headers 集合、请求/响应正文和错误字符串最多保留 64 KiB，超限标记截断；最多 100 条，保存在进程内存。明文可能包含 AppSecret、access_token、Cookie、验证码、OpenID 及客户端代理信息，供管理员自行导出脱敏。诊断页与 JSON 接口仍由 adminOnly 保护。
 
 验证：`go test ./internal/httpserver ./internal/wechat ./web ./cmd/fmlysys` 通过；覆盖原始请求/响应和错误内容、公众号及 OAuth 成功回调、普通成功 ping 的排除，以及公众号和网页登录 OAuth API exchange trace。`node --check web/static/admin-developer.js` 和 `git diff --check` 通过。诊断日志与 API 由管理员会话保护；未暂存、未提交。
+
+### 公众号二维码 48001 排查与出站网络跟踪
+
+线上原始诊断显示 `/cgi-bin/token` 成功返回 access token，紧接着 `/cgi-bin/qrcode/create` 由微信以 HTTP 200 返回 `errcode=48001, errmsg=api unauthorized`。因此网络、TLS、AppID/AppSecret 和 token 获取链路均已走通；实际失败点是当前公众号没有“生成带参数二维码”接口权限，不是 Cloudflare 入站代理，也不是 IP 白名单。典型白名单错误为 token 接口的 `40164 invalid ip`。个人未认证公众号需以后台“接口权限”页为准；若没有该能力，需更换具备权限的公众号或使用公众平台接口测试账号联调。
+
+为后续确认出站路径，微信 HTTP trace 增加代理 URL、DNS 结果、TCP connect 目标、本地/远端 socket、连接是否复用、TLS 服务名/版本及连接错误。后台表格的“来源信息”和原始 JSON 都会显示这些字段：直连时远端通常是微信边缘地址，使用 `HTTPS_PROXY` 时远端通常是代理地址。Cloudflare CDN 只影响访问 FmlySys 的入站流量；NAT 或上游代理后的最终公网出口地址无法从本机 socket 反推，应以微信 `40164` 回显或同代理链路的出口探测结果为准。后台对二维码接口的 `48001` 和微信 API 的 `40164` 增加直接判断提示。
+
+验证：`go test ./internal/httpserver ./internal/wechat ./web ./cmd/fmlysys`、`node --check web/static/admin-developer.js` 和 `git diff --check` 均通过；网络 trace 测试确认能够捕获实际 socket 本地/远端地址和 connect 目标。未执行 `git add`，未提交。

@@ -112,10 +112,14 @@ func (c *Client) getJSON(ctx context.Context, endpoint string, out any) error {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+	req, networkSnapshot := traceRequestNetwork(req, httpClient)
+	finish := func() {
+		c.observeExchange(ctx, started, req, &trace, networkSnapshot)
+	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		trace.Error, trace.ErrorTruncated = traceString(err.Error())
-		c.observeExchange(ctx, started, req, &trace)
+		finish()
 		return fmt.Errorf("微信接口请求失败：%w", err)
 	}
 	defer resp.Body.Close()
@@ -131,32 +135,35 @@ func (c *Client) getJSON(ctx context.Context, endpoint string, out any) error {
 	trace.ResponseBodyTruncated = trace.ResponseBodyTruncated || bodyTruncated
 	if readErr != nil {
 		trace.Error, trace.ErrorTruncated = traceString(readErr.Error())
-		c.observeExchange(ctx, started, req, &trace)
+		finish()
 		return fmt.Errorf("微信接口响应读取失败：%w", readErr)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		err := fmt.Errorf("微信接口 HTTP %d", resp.StatusCode)
 		trace.Error, trace.ErrorTruncated = traceString(err.Error())
-		c.observeExchange(ctx, started, req, &trace)
+		finish()
 		return err
 	}
 	if err := json.NewDecoder(bytes.NewReader(responseBody)).Decode(out); err != nil {
 		trace.Error, trace.ErrorTruncated = traceString(err.Error())
-		c.observeExchange(ctx, started, req, &trace)
+		finish()
 		return fmt.Errorf("微信接口响应解析失败：%w", err)
 	}
 	if apiErr := errorFromResponse(out); apiErr != nil {
 		trace.Error, trace.ErrorTruncated = traceString(apiErr.Error())
 	}
-	c.observeExchange(ctx, started, req, &trace)
+	finish()
 	return nil
 }
 
-func (c *Client) observeExchange(ctx context.Context, started time.Time, req *http.Request, trace *HTTPExchangeTrace) {
+func (c *Client) observeExchange(ctx context.Context, started time.Time, req *http.Request, trace *HTTPExchangeTrace, networkSnapshot ...func() HTTPNetworkTrace) {
 	trace.DurationMS = time.Since(started).Milliseconds()
 	if req != nil {
 		trace.URL = req.URL.String()
 		trace.RequestHeaders, trace.RequestHeadersTruncated = traceHeaders(req.Header)
+	}
+	if len(networkSnapshot) > 0 && networkSnapshot[0] != nil {
+		trace.Network = networkSnapshot[0]()
 	}
 	if c.Observer != nil {
 		c.Observer(ctx, *trace)

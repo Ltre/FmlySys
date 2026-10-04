@@ -129,6 +129,15 @@
   white-space: pre-wrap;
 }
 
+.diag-analysis-hint {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #eef6ff;
+  color: #285987;
+  line-height: 1.55;
+}
+
 .diag-kind-wechat {
   background: #e7f5ed;
   color: #246b43;

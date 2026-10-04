@@ -70,10 +70,32 @@
       appendCell(row, Number.isFinite(entry.duration_ms) ? `${entry.duration_ms} ms` : '—');
       const source = document.createElement('td');
       source.className = 'diag-source';
-      source.textContent = [entry.host, entry.proto && `HTTPS 代理: ${entry.proto}`, entry.cloudflare_ray && `CF-Ray: ${entry.cloudflare_ray}`, entry.user_agent].filter(Boolean).join('\n');
+      const network = entry.network || {};
+      source.textContent = [
+        entry.host,
+        entry.proto && `入站协议: ${entry.proto}`,
+        entry.cloudflare_ray && `CF-Ray: ${entry.cloudflare_ray}`,
+        network.proxy_url && `出站代理: ${network.proxy_url}`,
+        (network.local_address || network.remote_address) && `TCP: ${network.local_address || '?'} → ${network.remote_address || '?'}`,
+        network.dns_addresses?.length && `DNS: ${network.dns_addresses.join(', ')}`,
+        entry.user_agent,
+      ].filter(Boolean).join('\n');
       row.append(source);
 
       const detailCell = document.createElement('td');
+      const rawDiagnosticText = `${entry.message || ''}\n${entry.response_body || ''}`;
+      let diagnosticHint = '';
+      if (entry.kind === 'wechat_api' && entry.url?.includes('/cgi-bin/qrcode/create') && rawDiagnosticText.includes('48001')) {
+        diagnosticHint = '判断：请求已经到达微信，但当前公众号没有“生成带参数二维码”接口权限；这不是 IP 白名单错误。请以公众号后台“接口权限”页为准。';
+      } else if (entry.kind === 'wechat_api' && rawDiagnosticText.includes('40164')) {
+        diagnosticHint = '判断：微信拒绝了当前出站公网 IP。响应正文通常会给出微信实际看到的 IP，请将该 IP 加入白名单。';
+      }
+      if (diagnosticHint) {
+        const hint = document.createElement('p');
+        hint.className = 'diag-analysis-hint';
+        hint.textContent = diagnosticHint;
+        detailCell.append(hint);
+      }
       if (entry.message) {
         const message = document.createElement('p');
         message.className = 'diag-error-message';
@@ -108,6 +130,7 @@
         response_headers_truncated: entry.response_headers_truncated,
         response_body: entry.response_body,
         response_body_truncated: entry.response_body_truncated,
+        network: entry.network,
         error: entry.message,
         error_truncated: entry.message_truncated,
       }, null, 2);

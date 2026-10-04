@@ -18,7 +18,7 @@
 
 用户在公众号发送“登录”后，微信把文本消息再次 POST 到回调。FmlySys校验其 `FromUserName` 已绑定有效网页尝试，再生成八位验证码，把验证码摘要写入数据库，并通过本次回调的 XML 文本回复把验证码返回给用户。这里是微信服务器发起的入站回调及 FmlySys 的同步 XML 响应；当前实现没有调用微信“客服消息”发送 API。用户将验证码提交到 `POST /auth/wechat/code/login` 后，服务端检查 state Cookie 并一次性消费验证码，再按需调用 `GET https://api.weixin.qq.com/cgi-bin/user/info` 读取 OpenID/UnionID，匹配已绑定成员后设置 `fmly_session` Cookie。
 
-后台诊断会同时捕获出站 token、二维码、用户信息 API 的方法、完整 URL、请求 Headers/正文、HTTP 状态、响应 Headers/正文、耗时和传输/API 错误；也会捕获回调 GET/POST 的原始查询、请求 Headers/正文和 FmlySys 返回的 Headers/正文。微信 API 的成功响应和公众号成功回调也会记录，以便还原完整往返过程。已有的网页登录 OAuth 回调 `/auth/wechat/callback` 及其 `sns/oauth2/access_token`、`sns/userinfo` 出站请求也纳入同一诊断。二维码接口 URL 含 `access_token`，token 获取 URL 含 AppID/AppSecret；OAuth URL 还可能含授权 code 和 secret；回调 XML 和登录提交内容也可能含 OpenID、验证码、Cookie 或其他身份信息。
+后台诊断会同时捕获出站 token、二维码、用户信息 API 的方法、完整 URL、请求 Headers/正文、HTTP 状态、响应 Headers/正文、耗时和传输/API 错误；也会捕获回调 GET/POST 的原始查询、请求 Headers/正文和 FmlySys 返回的 Headers/正文。微信 API 的成功响应和公众号成功回调也会记录，以便还原完整往返过程。已有的网页登录 OAuth 回调 `/auth/wechat/callback` 及其 `sns/oauth2/access_token`、`sns/userinfo` 出站请求也纳入同一诊断。出站网络 trace 还包括实际采用的代理 URL、DNS 结果、TCP 连接目标、本地/远端 socket 地址、连接复用状态和 TLS 版本。二维码接口 URL 含 `access_token`，token 获取 URL 含 AppID/AppSecret；OAuth URL 还可能含授权 code 和 secret；回调 XML 和登录提交内容也可能含 OpenID、验证码、Cookie 或其他身份信息。
 
 ## 新接入
 
@@ -86,6 +86,9 @@ FMLYSYS_WECHAT_OA_TOKEN=自行生成的随机字符串
 诊断日志只在当前进程内存中保留最近 100 条，重启后清空。普通登录/探测路径只记录 HTTP 4xx/5xx 和处理 panic；普通 2xx/3xx 不记录。微信 API 交互和网页登录/公众号回调属于专门的诊断类别，无论成功或失败都会记录，包括 200/302。原始详情包含 URL 查询参数、请求与响应 Headers（包括 Cookie/Set-Cookie）、正文、远端地址、状态码、耗时、User-Agent、代理信息和未脱敏错误。URL 可能含 AppSecret、access_token 或授权 code，回调正文可能含 OpenID 和验证码。URL、query、每组 Headers、请求/响应正文和错误文字各最多保留 64 KiB，超限字段会标记截断；日志最多保留 100 条且不写入数据库或磁盘。
 
 - 有 `/login/wechat-code` 的 502 记录：请求到达 Go 服务，502 是应用在生成登录二维码或保存登录状态时返回的。查看同一时间附近的“微信 API”条目，可检查 token/二维码 API 的原始 HTTP 状态、响应错误码和正文；若有单独的“登录错误”条目，也可查看完整 Go 错误。
+- 二维码接口返回 `48001 api unauthorized`：请求已经到达微信，access token 也已被微信解析，但当前公众号没有“生成带参数二维码”接口权限。检查公众号后台“设置与开发/接口权限”中是否列出并已获得该接口；个人未认证公众号若没有该权限，修改 IP 白名单不能解决，需要改用具备该权限的公众号，或先用微信公众平台接口测试账号联调。
+- token 接口返回 `40164 invalid ip`：这才是典型的 IP 白名单问题。响应正文通常会给出微信实际看到的出口 IP，把该 IP 加入公众号白名单后再试。若 token 已成功返回而二维码接口是 `48001`，当前失败点不是 IP 白名单。
+- 出站请求不会经过站点前面的 Cloudflare CDN；Cloudflare 只处理访问 FmlySys 域名的入站流量。Go 客户端会按服务器环境中的 `HTTPS_PROXY`/`NO_PROXY` 和系统网络路由访问微信。诊断中的 `network.proxy_url` 可判断是否走代理，`local_address`/`remote_address` 可看到本机到直连目标或代理的 socket；经过 NAT 或上游代理后的最终公网出口 IP 无法仅从本机 socket 得出，应以微信 `40164` 返回的 IP 或使用同一代理链路的出口 IP 探测结果为准。
 - 对照 `微信 API` 二维码请求正文中的 scene 与 `微信回调` XML 中的 `EventKey`，可确认公众号是否把当前网页二维码事件送达；`qrscene_` 前缀会由回调处理器去掉。再对照回调中的 `FromUserName`、文本消息和 XML 响应，可检查扫码绑定及验证码回复流程。
 - 没有对应的登录请求记录：如果期间没有重启或切换服务实例，通常表示请求未到达当前 Go 进程。检查 Cloudflare/WAF、反向代理 upstream、DNS 和实际部署目标；多实例部署时需查看实际处理请求的实例。应用内的诊断页无法读取 Cloudflare 边缘或未到达源站的代理日志。
 - 手机显示网关错误但列表没有登录请求记录：若开发中心源站探测正常，仍需按 CF-Ray（从 Cloudflare 错误页查看）排查边缘/WAF/路由，确认 `/login/wechat-code` 是否到达源站。源站 ping 的成功 200 不会记录。
