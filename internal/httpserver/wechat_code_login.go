@@ -209,9 +209,6 @@ func (s *Server) wechatCodeCallback(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "success")
 		return
 	}
-	if message.MsgType == "event" {
-		s.recordWeChatCallbackEvent(message)
-	}
 	switch message.MsgType {
 	case "event":
 		if message.Event == "subscribe" || message.Event == "SCAN" {

@@ -107,12 +107,12 @@ Put the financial timeline first in the assets quick menu and ensure older asset
 
 已对新增和修改的 Go 文件执行 `gofmt`。`internal/config`、`internal/wechat`、`internal/httpserver` 检查通过；新增 Store 验证测试也通过。`internal/store` 全包检查仍被原有 `TestNormalizePermissionsAddsViewDependencies` 阻断：它提交已不在当前权限目录中的 `medication.manage`，本次未改动该测试或权限定义。站点实际后端未能读取，按公开 UI 与本项目现有身份流程实现；未暂存、未提交。
 
-### 管理员开发中心与菜单 VIEW 探针
+### 微信手工菜单可行性复核与探针撤销
 
-为确认未认证公众号手工菜单是否把跳转事件送入已配置的消息回调，增加管理员专用 `/admin/developer` 页面和导航入口。公众号 POST 回调在 Token 签名校验通过后，将事件类型、FromUserName、EventKey 和接收时间记录到进程内最近 50 条缓冲；开发中心通过受管理员会话保护的 JSON 端点轮询展示。只记录事件元数据，不记录普通消息正文；缓冲不落库，重启清空。新增回调测试覆盖 VIEW 事件捕获与成功确认。
+最初为验证未认证公众号的手工菜单是否推送 `VIEW`，曾加入后台事件探针。用户随后根据公众号后台实际选项确认，“跳转网页”只能选择公众号链接，不能填写 FmlySys 自定义网址。因此，菜单无法打开系统登录/票据页面，VIEW 回调与手机浏览器请求也无法自动关联，单独观察事件不能达成登录目标。本次撤销开发中心页面、导航和事件缓冲逻辑及其专用测试，不再为这条不可落地的菜单链路增加功能。
 
-验证菜单时，手工“跳转网页”指向 `/healthz?source=wechat-menu-view-test`，然后由关注者实际点击；若列表出现 VIEW，则可确认事件带回公众号 OpenID。菜单 URL 本身仍为静态链接，VIEW 是独立回调，不能直接把两条请求按时间或“最后点击”配对。后续安全登录方案应让回调生成短时一次性票据并通过公众号返回用户，先完成成员身份映射和防重放限流。该菜单登录尚未实现，现有变更只提供观察与验证工具。
+保留 `doc/wechat-code-login.md` 作为完整接入、维护和排障指南，并改为明确说明该账号菜单链接限制及其影响。对当前账号仍建议采用已实现的公众号二维码验证码登录；只有账号权限或可用链接条件变化后，才重新评估菜单一次性票据方案。`FMLYSYS_WECHAT_OA_TOKEN` 对应公众号表单 Token，当前回调只支持明文 XML，EncodingAESKey 不用于现有实现。
 
-新增 `doc/wechat-code-login.md`，覆盖首次接入、后台与环境变量配置、实际验证码流、菜单 VIEW 验证、个人未认证公众号的边界、密钥维护和排障；README 增加文档入口。`FMLYSYS_WECHAT_OA_TOKEN` 对应公众号表单 Token，当前只支持明文 XML，EncodingAESKey 不用于现有实现。
+撤销探针后运行 `go test ./internal/httpserver ./web` 均通过，`git diff --check` 通过。保留 `/login/wechat-code` 路由注册测试；未暂存、未提交。
 
-另核对线上 `/login/wechat-code` 异常：当前 `server.go` 明确注册 `GET /login/wechat-code`，因此 502 与 `Cannot GET` 并非此 handler 的应用响应。前者需检查 Cloudflare 到源站的连通与源站进程，后者表示请求到达未包含该路由的旧/不同服务或代理目标。增加路由注册测试，并将区分步骤补充到接入指南；无法在没有线上域名和部署访问权限的情况下验证具体源站状态。
+另核对线上 `/login/wechat-code` 异常：当前 `server.go` 明确注册 `GET /login/wechat-code`，因此 502 与 `Cannot GET` 并非此 handler 的应用响应。前者需检查 Cloudflare 到源站的连通与源站进程，后者表示请求到达未包含该路由的旧/不同服务或代理目标。保留路由注册测试，并将区分步骤补充到接入指南；无法在没有线上域名和部署访问权限的情况下验证具体源站状态。

@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
@@ -37,16 +36,14 @@ const (
 )
 
 type Server struct {
-	PM            *partition.Manager
-	Store         *store.Store
-	Admin         *adminauth.Service
-	Config        config.Config
-	DevActorID    int64
-	Templates     *template.Template
-	wechatOA      *wechat.OfficialAccountClient
-	mux           *http.ServeMux
-	wechatEventMu sync.RWMutex
-	wechatEvents  []wechatCallbackProbeEvent
+	PM         *partition.Manager
+	Store      *store.Store
+	Admin      *adminauth.Service
+	Config     config.Config
+	DevActorID int64
+	Templates  *template.Template
+	wechatOA   *wechat.OfficialAccountClient
+	mux        *http.ServeMux
 }
 
 type view struct {
@@ -83,8 +80,6 @@ type view struct {
 	WeChatCodeLoginReady  bool
 	WeChatQRCodeURL       string
 	WeChatLoginState      string
-	WeChatCallbackPath    string
-	WeChatMenuTestPath    string
 	DevAuthEnabled        bool
 	AdminConfigured       bool
 	AdminUsername         string
