@@ -1,0 +1,9 @@
+.wechat-code-card{width:min(100%,480px);text-align:center}
+.wechat-code-card h1{margin-bottom:8px}
+.wechat-login-qr{display:grid;place-items:center;margin:22px auto 16px}
+.wechat-login-qr img{display:block;width:min(248px,68vw);height:auto;aspect-ratio:1;object-fit:contain;border:1px solid #e5e7eb;border-radius:12px;background:#fff;padding:8px}
+.wechat-login-help{max-width:360px;margin:0 auto 18px;color:#697386;line-height:1.75}
+.wechat-code-form{text-align:left}
+.wechat-code-form input{text-align:center;letter-spacing:.22em;font-size:18px}
+.wechat-back-link{margin-top:12px}
+@media(max-width:480px){.wechat-code-card{padding:22px 18px}.wechat-login-qr{margin-top:18px}.wechat-login-qr img{width:min(220px,62vw)}}

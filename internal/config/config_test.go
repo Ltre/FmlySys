@@ -12,6 +12,9 @@ func TestLoadReadsDataConfigAndEnvironmentOverrides(t *testing.T) {
 FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD="pass # with spaces"
 FMLYSYS_WECHAT_APP_ID=file-app
 FMLYSYS_WECHAT_APP_SECRET=file-secret
+FMLYSYS_WECHAT_OA_APP_ID=file-oa-app
+FMLYSYS_WECHAT_OA_APP_SECRET=file-oa-secret
+FMLYSYS_WECHAT_OA_TOKEN=0123456789abcdef0123456789abcdef
 FMLYSYS_DEV_AUTH_ENABLED=true
 `
 	if err := os.WriteFile(filepath.Join(dir, LocalConfigFilename), []byte(content), 0o600); err != nil {
@@ -23,6 +26,9 @@ FMLYSYS_DEV_AUTH_ENABLED=true
 		"FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD",
 		"FMLYSYS_WECHAT_APP_ID",
 		"FMLYSYS_WECHAT_APP_SECRET",
+		"FMLYSYS_WECHAT_OA_APP_ID",
+		"FMLYSYS_WECHAT_OA_APP_SECRET",
+		"FMLYSYS_WECHAT_OA_TOKEN",
 		"FMLYSYS_DEV_AUTH_ENABLED",
 		"FMLYSYS_PORT",
 		"FMLYSYS_BIND_HOST",
@@ -50,6 +56,19 @@ FMLYSYS_DEV_AUTH_ENABLED=true
 	}
 	if !cfg.WeChatConfigured() {
 		t.Fatal("WeChat should be configured with AppID + AppSecret only")
+	}
+	if cfg.WeChatOAAppID != "file-oa-app" || cfg.WeChatOAAppSecret != "file-oa-secret" || cfg.WeChatOAToken != "0123456789abcdef0123456789abcdef" || !cfg.WeChatCodeLoginConfigured() {
+		t.Fatalf("unexpected official account config: %+v", cfg)
+	}
+	tooShortToken := cfg
+	tooShortToken.WeChatOAToken = "short"
+	if tooShortToken.WeChatCodeLoginConfigured() {
+		t.Fatal("short callback token must not enable code login")
+	}
+	unsafeToken := cfg
+	unsafeToken.WeChatOAToken = "0123456789abcdef token"
+	if unsafeToken.WeChatCodeLoginConfigured() {
+		t.Fatal("callback token containing whitespace must not enable code login")
 	}
 	if !cfg.DevAuthEnabled {
 		t.Fatal("expected boolean value from data/config.env")

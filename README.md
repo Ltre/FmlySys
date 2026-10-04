@@ -106,6 +106,9 @@ FMLYSYS_ADMIN_USERNAME=admin
 FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=请换成至少10位的强密码
 FMLYSYS_WECHAT_APP_ID=你的AppID
 FMLYSYS_WECHAT_APP_SECRET=你的AppSecret
+FMLYSYS_WECHAT_OA_APP_ID=公众号AppID
+FMLYSYS_WECHAT_OA_APP_SECRET=公众号AppSecret
+FMLYSYS_WECHAT_OA_TOKEN=自行生成的32位回调Token
 FMLYSYS_MASTER_KEY=
 ```
 
@@ -208,6 +211,22 @@ https://family.example.com/auth/wechat/callback
 
 AppSecret 仅在服务端使用。未知微信身份扫码后只能提交加入申请，在后台审核通过并绑定到内部 `member_id` 以后才能创建正式成员 session。
 
+### 微信验证码登录
+
+第三种登录方式“微信验证码登录”通过公众号消息回调发放一次性验证码。需要为公众号配置：
+
+```text
+FMLYSYS_WECHAT_OA_APP_ID
+FMLYSYS_WECHAT_OA_APP_SECRET
+FMLYSYS_WECHAT_OA_TOKEN
+```
+
+其中 `FMLYSYS_WECHAT_OA_TOKEN` 需要是 16–32 个字符。将公众号开发者服务器 URL 设置为当前站点的 `/auth/wechat/code/callback`，并使用明文消息模式；服务器必须能从公网通过 HTTPS 访问。网页登录时系统会向公众号 API 申请一个绑定本次浏览器尝试的 10 分钟临时场景二维码。用户扫码后在公众号发送“登录”，公众号回复 8 位验证码；验证码 5 分钟有效、仅对应当前浏览器、限一次使用，并且错误输入 5 次后失效。
+
+启用开发者服务器后，公众号消息会交给此回调处理；当前只响应登录二维码事件和“登录”文本，其它消息会被确认但不自动回复。若公众号还承担其他消息业务，需要在此回调中合并处理。
+
+新登录方式只接受已有且已绑定有效家族成员的微信身份，不会创建或审批成员。网站 OAuth 使用网站应用 OpenID，公众号回调使用公众号 OpenID；要跨应用识别为同一个人，网站应用和公众号需绑定在同一个微信开放平台账号下，使公众号用户信息接口返回的 UnionID 可匹配到已审核身份。若没有 UnionID，则只在 OpenID 完全相同的情况下允许匹配。
+
 ## 环境变量摘要
 
 启动脚本负责：
@@ -228,6 +247,9 @@ FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=
 FMLYSYS_MASTER_KEY=
 FMLYSYS_WECHAT_APP_ID=
 FMLYSYS_WECHAT_APP_SECRET=
+FMLYSYS_WECHAT_OA_APP_ID=
+FMLYSYS_WECHAT_OA_APP_SECRET=
+FMLYSYS_WECHAT_OA_TOKEN=
 ```
 
 旧的 `FMLYSYS_ADDR` 不再使用。

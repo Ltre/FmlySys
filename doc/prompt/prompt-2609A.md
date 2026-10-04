@@ -291,6 +291,108 @@
 问：
 
 
+
+    参考这个网站实现的另类的微信扫码”登录”
+    https://aiwave.site/
+    先看看后端是怎么实现的，我猜是用户扫码关注后，收到首推的验证码，当用户输入验证码后，系统就将用户登录会话跟后台获取到的微信用户ID关联。后续如果会话丢失需要第二次登录，那就可能需要用户向公众好发送特定的字符串索取登录验证码。
+    任务：
+           在dev-2609A-step2-fake-wechat-qrlogin 分支上增加第三种登录方式：实现这种另类的微信扫码从公众号获取验证码填入网站登录的功能。
+            第三种登录方式在界面上命名为"微信验证码登录"
+
+
+答：
+
+
+
+    我会先查看参考站点可见的扫码、取码和登录流程，再检查本项目现有的微信公众号回调、登录会话与登录页。你附的截图我会作为界面参考；实现以你的文字需求为准。随后我会切到指定分支，并保留工作区里已有的未提交改动。
+
+    运行了命令已搜索网页
+
+    上下文已自动压缩
+
+    已搜索网页 ：微信 验证码 登录 扫码 公众号 | aiwave.site ...
+
+    搜索结果里没有找到这个站点登录流程的可靠说明，直接打开站点也暂时失败。我会再尝试读取实际登录页；同时检查本项目已有的微信身份绑定和回调能力，确保新方式最终仍通过已绑定的微信身份建立登录会话。
+
+    已使用 浏览器
+
+    已请求权限
+
+    已使用 浏览器
+
+    参考站点在浏览器里能打开标题，但页面内容读取卡住；目前还不能据此确认它的真实后端实现。我先从本项目源码追踪微信 OAuth 身份映射、会话签发和服务器回调配置，再决定如何用公众号消息验证码接入这条已有的可信身份链。
+
+    运行了命令已搜索网页
+
+    现有正式微信登录用网站应用 OAuth 获取 OpenID/UnionID，再把已审核的微信身份映射到成员并签发会话。公众号消息里的 OpenID 属于公众号自己的应用范围，不能直接假设它等于网站 OAuth 的 OpenID；要可靠打通，需要同一开放平台下的 UnionID。实现上我会让每个登录页生成有时效的一次性场景二维码，扫码事件绑定当前浏览器尝试，公众号收到“登录”后返回验证码，再由服务端按 UnionID 找到既有成员身份。这样也能避免单纯输入一个全局验证码造成的登录串号。
+
+    编辑了文件运行了命令
+
+    身份链和主要处理路径已经搭好：二维码对应一条短时登录尝试，公众号回调只接受微信签名的消息，验证码只存 HMAC 摘要、绑定该浏览器状态并限次使用。接下来补配置说明、界面和存储边界的检查，再处理回调重放与失败场景。
+
+    编辑了文件运行了命令
+
+    格式化已经完成。Go 测试首次运行被沙盒拦在用户目录的编译缓存写入权限上；我会按环境要求申请这次测试所需的受控权限，同时继续审查代码和配置差异。
+
+    编辑了文件读取文件运行了命令
+
+    新方式目前能完整串起“动态二维码 → 公众号扫码事件 → 发送‘登录’ → 当前浏览器输入一次性验证码 → 已绑定成员会话”。新加的验证码、公众号客户端和回调安全检查已被执行；四个受影响包里，只有一个原有的成员权限测试失败，它引用当前权限目录已不支持的 medication.manage，与本次改动无关。我正在做最后的差异与工作区检查，并会把这个检查结果写进开发日志。
+
+    编辑了文件运行了命令
+
+    我补上了按登录尝试区分的 HttpOnly 状态 Cookie，避免多个标签页互相覆盖，也阻止跨站伪造登录请求。端到端测试现在覆盖公众号回调发码、错误浏览器状态拒绝，以及正确验证码签发成员 Session；相关 HTTP 测试通过。最后我会确认目标分支、无暂存，并复查完整差异。
+
+    运行了命令
+
+    已在 `dev-2609A-step2-fake-wechat-qrlogin` 分支实现第三种登录方式“微信验证码登录”，没有暂存或提交。
+
+    登录流程是：网页生成绑定当前登录尝试的临时公众号二维码；扫码后，用户在公众号发送“登录”，公众号通过签名校验的消息回调回复 8 位验证码；验证码限时、限次且只能使用一次。状态 Cookie 按登录尝试隔离，避免多个标签页串号和跨站伪造。相关处理见[微信验证码登录流程](D:/Workspace/github/Ltre/FmlySys/internal/httpserver/wechat_code_login.go)、[公众号 API 客户端](D:/Workspace/github/Ltre/FmlySys/internal/wechat/official_account.go)和[登录页](D:/Workspace/github/Ltre/FmlySys/web/templates/wechat-code-login.html)。
+
+    我尝试读取 `aiwave.site`，但只能取得页面标题，页面内容读取超时；因此无法核实该站的实际后端或 API，也没有把推测当作事实。实现依据截图所示的交互，并复用了本项目已有的微信身份绑定和成员会话流程。关键身份限制是：网站应用和公众号的 OpenID 可能不同；要跨应用匹配，通常需要它们绑定在同一个微信开放平台账号下并使用 UnionID。[微信支付商户文档中心](https://pay.wechatpay.cn/doc/v3/merchant/4012068676)
+
+    启用前需配置 `FMLYSYS_WECHAT_OA_APP_ID`、`FMLYSYS_WECHAT_OA_APP_SECRET` 和 16–32 位回调 Token，并将公众号开发者服务器 URL 指向 `/auth/wechat/code/callback`，使用明文消息模式及公网 HTTPS。新登录只接受已绑定有效成员的微信身份，不会自动创建或审批成员。配置与操作说明记录在[README](D:/Workspace/github/Ltre/FmlySys/README.md)，开发记录在[devlog](D:/Workspace/github/Ltre/FmlySys/doc/devlog/devlog-2609-features.md)。
+
+    `gofmt` 与 `git diff --check` 通过。`internal/config`、`internal/wechat` 和 `internal/httpserver` 测试通过，新增的 Store 验证测试也通过；`internal/store` 全包测试仍被原有 `TestNormalizePermissionsAddsViewDependencies` 阻断，该测试使用当前权限目录不再接受的 `medication.manage`。
+
+    **Title**
+
+    ```text
+    feat: add WeChat public-account code login
+    ```
+
+    **Description**
+
+    ```text
+    Add a third login method that creates a temporary WeChat public-account QR code for each browser attempt. Verify signed account callbacks, issue a short-lived one-time code when the user sends “登录”, and bind redemption to the matching browser state.
+
+    Resolve the account through an existing approved WeChat identity using OpenID or an unambiguous UnionID match, then create the existing member session. Add configuration, database migration, login UI, setup documentation, and security-focused tests.
+    ```
+
+    已编辑 17 个文件+1,354-78查看变更撤销查看变更
+
+    internal/config/config.gointernal/config/config.go+25-7
+    migrations/partition/000011_wechat_code_login.sqlmigrations/partition/000011_wechat_code_login.sql+16-0
+    internal/store/wechat_code_login.gointernal/store/wechat_code_login.go+180-0
+    internal/wechat/official_account.gointernal/wechat/official_account.go+264-30
+    internal/httpserver/server.gointernal/httpserver/server.go+31-16
+    internal/httpserver/wechat_code_login.gointernal/httpserver/wechat_code_login.go+322-0
+    web/templates/login.htmlweb/templates/login.html+3-1
+    web/templates/wechat-code-login.htmlweb/templates/wechat-code-login.html+1-0
+    web/static/wechat-code-login.cssweb/static/wechat-code-login.css+9-0
+    internal/config/config_test.gointernal/config/config_test.go+27-8
+    scripts/linux-alyhk.start.shscripts/linux-alyhk.start.sh+7-3
+    scripts/win-dev.start.cmdscripts/win-dev.start.cmd+6-2
+    README.mdREADME.md+30-8
+    doc/devlog/devlog-2609-features.mddoc/devlog/devlog-2609-features.md+26-3
+    internal/store/wechat_code_login_test.gointernal/store/wechat_code_login_test.go+115-0
+    internal/wechat/official_account_test.gointernal/wechat/official_account_test.go+63-0
+    internal/httpserver/wechat_code_login_test.gointernal/httpserver/wechat_code_login_test.go+229-0
+
+
+
+问：
+
+
 	3、文件共享（利用Drop2Tunnel开发好的网盘API）
 
 	2、前台和后台，消费记录、报销记录、资产变动记录、成员内部转账记录，要支持图片直接预览

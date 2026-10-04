@@ -41,6 +41,9 @@ FMLYSYS_ADMIN_USERNAME=admin
 FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD=
 FMLYSYS_WECHAT_APP_ID=
 FMLYSYS_WECHAT_APP_SECRET=
+FMLYSYS_WECHAT_OA_APP_ID=
+FMLYSYS_WECHAT_OA_APP_SECRET=
+FMLYSYS_WECHAT_OA_TOKEN=
 FMLYSYS_MASTER_KEY=
 CONFIGEOF
     chmod 600 "$FMLYSYS_CONFIG_FILE" 2>/dev/null || true
@@ -57,6 +60,7 @@ echo "[FmlySys] Data directory: $FMLYSYS_DATA_DIR"
 echo "[FmlySys] Local config: $FMLYSYS_CONFIG_FILE"
 echo "[FmlySys] Admin credentials: $FMLYSYS_ADMIN_CREDENTIALS"
 echo "[FmlySys] WeChat callback path: /auth/wechat/callback (origin is derived from the login request)"
+echo "[FmlySys] WeChat code-login callback path: /auth/wechat/code/callback"
 echo "[FmlySys] Local dev login: $FMLYSYS_DEV_AUTH_ENABLED"
 echo
 

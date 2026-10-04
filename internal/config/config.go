@@ -23,6 +23,9 @@ type Config struct {
 	DevAuthEnabled         bool
 	WeChatAppID            string
 	WeChatAppSecret        string
+	WeChatOAAppID          string
+	WeChatOAAppSecret      string
+	WeChatOAToken          string
 	AdminUsername          string
 	AdminBootstrapPassword string
 	MasterKey              string
@@ -75,6 +78,9 @@ func Load() (Config, error) {
 		DevAuthEnabled:         parseBool(value("FMLYSYS_DEV_AUTH_ENABLED", ""), false),
 		WeChatAppID:            strings.TrimSpace(value("FMLYSYS_WECHAT_APP_ID", "")),
 		WeChatAppSecret:        strings.TrimSpace(value("FMLYSYS_WECHAT_APP_SECRET", "")),
+		WeChatOAAppID:          strings.TrimSpace(value("FMLYSYS_WECHAT_OA_APP_ID", "")),
+		WeChatOAAppSecret:      strings.TrimSpace(value("FMLYSYS_WECHAT_OA_APP_SECRET", "")),
+		WeChatOAToken:          strings.TrimSpace(value("FMLYSYS_WECHAT_OA_TOKEN", "")),
 		AdminUsername:          nonEmpty("FMLYSYS_ADMIN_USERNAME", "admin"),
 		AdminBootstrapPassword: value("FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD", ""),
 		MasterKey:              value("FMLYSYS_MASTER_KEY", ""),
@@ -95,6 +101,18 @@ func listenPortFromEnvironment() (int, error) {
 
 func (c Config) WeChatConfigured() bool {
 	return c.WeChatAppID != "" && c.WeChatAppSecret != ""
+}
+
+func (c Config) WeChatCodeLoginConfigured() bool {
+	if c.WeChatOAAppID == "" || c.WeChatOAAppSecret == "" || len(c.WeChatOAToken) < 16 || len(c.WeChatOAToken) > 32 {
+		return false
+	}
+	for i := 0; i < len(c.WeChatOAToken); i++ {
+		if c.WeChatOAToken[i] < 0x21 || c.WeChatOAToken[i] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func loadConfigFile(path string) (map[string]string, error) {

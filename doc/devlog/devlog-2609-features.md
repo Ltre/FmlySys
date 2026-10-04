@@ -83,3 +83,26 @@ Add a minimize control that saves the current timeline page and reading position
 
 Put the financial timeline first in the assets quick menu and ensure older asset movement records remain available as jump targets.
 ```
+
+## 微信公众号验证码登录
+
+日期：2026-10-04
+分支：`dev-2609A-step2-fake-wechat-qrlogin`
+
+### 参考站点调查与身份链
+
+尝试读取 `https://aiwave.site/` 的公开页面和检索结果。浏览器只返回页面标题“DevTools Hub - 程序员软件宝库”，页面内容读取超时；命令行 TLS 请求也失败。站点后端源码及其真实 API 因而无法公开检查，不能据此断言它具体如何存码或绑定用户。附图和说明提供了可见交互：扫描公众号二维码、发送“登录”、把收到的验证码填回网页。
+
+本项目已有微信登录通过网站 OAuth 获得 OpenID/UnionID，将身份审核绑定到成员后签发 `fmly_session`。公众号回调收到的 `FromUserName` 是该公众号范围内的 OpenID，不能假定它等于网站应用 OpenID；实现先从公众号用户信息接口读取 UnionID，再与已审核 `wechat_identities` 中的 UnionID 匹配。微信公众号和网站应用需要绑定在同一微信开放平台账号下才能跨应用匹配；没有 UnionID 时只接受完全相同的 OpenID。该方式不会创建新成员或绕过既有审核绑定。
+
+### 实现方案与修改
+
+- 登录页新增“微信验证码登录”入口和独立验证码页。服务端向公众号申请 10 分钟有效的 `QR_STR_SCENE` 临时二维码，每个二维码绑定随机浏览器状态；公众号服务器回调必须通过 Token、timestamp、nonce 的 SHA-1 签名校验。
+- 用户扫码后，公众号的 `subscribe` / `SCAN` 事件把 OA OpenID 绑定到此次登录尝试；只有这个微信身份在该次请求下发送“登录”才会收到验证码。验证码为随机 8 位数字，有效期 5 分钟，绑定扫码的网页登录状态，成功后一次性消费；错误输入 5 次会失效，短时间重复索取会限流。
+- 数据库只保存登录 state、scene 的摘要和 HMAC 验证码摘要。新增 `000011_wechat_code_login.sql`，不保存明文验证码。成员登录只复用已有的成员会话创建逻辑。
+- 新增 `FMLYSYS_WECHAT_OA_APP_ID`、`FMLYSYS_WECHAT_OA_APP_SECRET`、`FMLYSYS_WECHAT_OA_TOKEN` 配置、公众号 access_token 缓存、临时二维码和用户 UnionID 调用，并更新首次启动配置模板与 README。
+- 新增公众号开发者回调 `/auth/wechat/code/callback`。微信公众平台需设置该 URL、同一个 Token、明文消息模式，服务器需从公网可通过 HTTPS 访问。
+
+### 检查状态
+
+已对新增和修改的 Go 文件执行 `gofmt`。`internal/config`、`internal/wechat`、`internal/httpserver` 检查通过；新增 Store 验证测试也通过。`internal/store` 全包检查仍被原有 `TestNormalizePermissionsAddsViewDependencies` 阻断：它提交已不在当前权限目录中的 `medication.manage`，本次未改动该测试或权限定义。站点实际后端未能读取，按公开 UI 与本项目现有身份流程实现；未暂存、未提交。

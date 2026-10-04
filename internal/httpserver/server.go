@@ -42,6 +42,7 @@ type Server struct {
 	Config     config.Config
 	DevActorID int64
 	Templates  *template.Template
+	wechatOA   *wechat.OfficialAccountClient
 	mux        *http.ServeMux
 }
 
@@ -76,6 +77,9 @@ type view struct {
 	PendingJoins          []store.JoinRequest
 	JoinRequest           store.JoinRequest
 	WeChatConfigured      bool
+	WeChatCodeLoginReady  bool
+	WeChatQRCodeURL       string
+	WeChatLoginState      string
 	DevAuthEnabled        bool
 	AdminConfigured       bool
 	AdminUsername         string
@@ -112,6 +116,9 @@ func New(pm *partition.Manager, st *store.Store, admin *adminauth.Service, cfg c
 		return nil, err
 	}
 	s := &Server{PM: pm, Store: st, Admin: admin, Config: cfg, DevActorID: devActorID, Templates: t, mux: http.NewServeMux()}
+	if cfg.WeChatCodeLoginConfigured() {
+		s.wechatOA = wechat.NewOfficialAccount(cfg.WeChatOAAppID, cfg.WeChatOAAppSecret)
+	}
 	s.routes()
 	return s, nil
 }
@@ -120,11 +127,12 @@ func (s *Server) Handler() http.Handler { return logging(s.mux) }
 
 func (s *Server) base(title string) view {
 	return view{
-		Title:             title,
-		ActivePartition:   s.PM.ActiveID,
-		PermissionCatalog: store.PermissionCatalog,
-		WeChatConfigured:  s.Config.WeChatConfigured(),
-		DevAuthEnabled:    s.Config.DevAuthEnabled,
+		Title:                title,
+		ActivePartition:      s.PM.ActiveID,
+		PermissionCatalog:    store.PermissionCatalog,
+		WeChatConfigured:     s.Config.WeChatConfigured(),
+		WeChatCodeLoginReady: s.Config.WeChatCodeLoginConfigured(),
+		DevAuthEnabled:       s.Config.DevAuthEnabled,
 	}
 }
 
@@ -138,6 +146,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /login/dev", s.devLogin)
 	s.mux.HandleFunc("GET /login/wechat", s.wechatLogin)
 	s.mux.HandleFunc("GET "+WeChatCallbackPath, s.wechatCallback)
+	s.mux.HandleFunc("GET /login/wechat-code", s.wechatCodeLoginPage)
+	s.mux.HandleFunc("POST /auth/wechat/code/login", s.wechatCodeLogin)
+	s.mux.HandleFunc("GET /auth/wechat/code/callback", s.wechatCodeCallbackVerify)
+	s.mux.HandleFunc("POST /auth/wechat/code/callback", s.wechatCodeCallback)
 	s.mux.HandleFunc("GET /join", s.joinPage)
 	s.mux.HandleFunc("POST /join", s.submitJoin)
 	s.mux.HandleFunc("POST /logout", s.memberLogout)
@@ -324,6 +336,9 @@ func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	v := s.base("登录 FmlySys")
+	if r.URL.Query().Get("error") == "wechat-unbound" {
+		v.Error = wechatCodeLoginError("unbound")
+	}
 	s.render(w, "login.html", v)
 }
 
