@@ -50,6 +50,8 @@ func (s *Server) WithAdminEnhancements(next http.Handler) http.Handler {
 	mux.HandleFunc("POST /admin/members/{id}/delete", s.adminOnly(s.adminSoftDeleteMember))
 	mux.HandleFunc("GET /admin/api/quick-money-notes", s.adminOnly(s.adminQuickMoneyNotesJSON))
 	mux.HandleFunc("GET /admin/api/transfers", s.adminOnly(s.adminTransfersJSON))
+	mux.HandleFunc("GET /admin/developer", s.adminOnly(s.adminDeveloperCenter))
+	mux.HandleFunc("GET /admin/api/wechat-callback-events", s.adminOnly(s.adminWeChatCallbackEventsJSON))
 	mux.HandleFunc("GET /admin/quick-money-note-to-standarized", s.adminOnly(s.adminQuickMoneyStandardizePage))
 	mux.HandleFunc("POST /admin/quick-money-note-to-standarized", s.adminOnly(s.adminQuickMoneyStandardize))
 	mux.Handle("/", next)

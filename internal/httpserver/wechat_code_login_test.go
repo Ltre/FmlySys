@@ -45,6 +45,16 @@ func TestValidWeChatSignatureRejectsInvalidAndStaleCallbacks(t *testing.T) {
 	}
 }
 
+func TestWeChatCodeLoginPageRouteIsRegistered(t *testing.T) {
+	s := &Server{mux: http.NewServeMux()}
+	s.routes()
+	request := httptest.NewRequest(http.MethodGet, "/login/wechat-code", nil)
+	_, pattern := s.mux.Handler(request)
+	if pattern != "GET /login/wechat-code" {
+		t.Fatalf("route pattern=%q, want GET /login/wechat-code", pattern)
+	}
+}
+
 func TestWeChatLoginCodeIsEightDigitsAndKeyed(t *testing.T) {
 	code, err := generateWeChatLoginCode()
 	if err != nil {
@@ -118,6 +128,34 @@ failed_attempts INTEGER NOT NULL DEFAULT 0,consumed_at TEXT NOT NULL DEFAULT '',
 	openID, err := st.ConsumeWeChatCodeLoginCode(ctx, wechatTokenHash(state), wechatLoginCodeHash(numericCode, token), time.Now())
 	if err != nil || openID != "oa-user-openid" {
 		t.Fatalf("code did not redeem for the scanned user: openID=%q err=%v", openID, err)
+	}
+}
+
+func TestWeChatViewEventIsCapturedForAdminDeveloperCenter(t *testing.T) {
+	token := "callback-token-for-tests-123456"
+	s := &Server{Config: config.Config{
+		WeChatOAAppID:     "oa-app",
+		WeChatOAAppSecret: "oa-secret",
+		WeChatOAToken:     token,
+	}}
+	values := url.Values{}
+	values.Set("timestamp", fmt.Sprintf("%d", time.Now().Unix()))
+	values.Set("nonce", "view-event-nonce")
+	values.Set("signature", weChatTestSignature(token, values.Get("timestamp"), values.Get("nonce")))
+	body := `<xml><ToUserName><![CDATA[gh-account]]></ToUserName><FromUserName><![CDATA[oa-viewer-openid]]></FromUserName><CreateTime>123456789</CreateTime><MsgType><![CDATA[event]]></MsgType><Event><![CDATA[VIEW]]></Event><EventKey><![CDATA[https://family.example.test/healthz?source=wechat-menu-view-test]]></EventKey></xml>`
+	request := httptest.NewRequest("POST", "/auth/wechat/code/callback?"+values.Encode(), strings.NewReader(body))
+	response := httptest.NewRecorder()
+	s.wechatCodeCallback(response, request)
+	if response.Code != http.StatusOK || response.Body.String() != "success" {
+		t.Fatalf("callback status=%d body=%s", response.Code, response.Body.String())
+	}
+	events := s.latestWeChatCallbackEvents()
+	if len(events) != 1 {
+		t.Fatalf("captured %d events, want 1", len(events))
+	}
+	event := events[0]
+	if event.Event != "VIEW" || event.FromUserName != "oa-viewer-openid" || event.EventKey != "https://family.example.test/healthz?source=wechat-menu-view-test" {
+		t.Fatalf("unexpected captured event: %+v", event)
 	}
 }
 

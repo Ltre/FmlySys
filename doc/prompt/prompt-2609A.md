@@ -387,8 +387,218 @@
     internal/store/wechat_code_login_test.gointernal/store/wechat_code_login_test.go+115-0
     internal/wechat/official_account_test.gointernal/wechat/official_account_test.go+63-0
     internal/httpserver/wechat_code_login_test.gointernal/httpserver/wechat_code_login_test.go+229-0
+    
+    
+    
+    
+问：
 
 
+    FMLYSYS_WECHAT_OA_TOKEN
+    这个是什么，从哪获取
+    
+
+答：
+
+
+    `FMLYSYS_WECHAT_OA_TOKEN` 是公众号回调的**校验密钥**，用来验证收到的请求确实来自微信。它不是微信分配给你的值，而是你自己生成的一串随机字符。
+
+    生成一个 **16–32 位的可见 ASCII 字符串**，然后在两处填写完全相同的值：
+
+    1. 项目配置 `data/config.env`：`FMLYSYS_WECHAT_OA_TOKEN=你的随机字符串`
+    2. 微信公众平台的服务器配置中，填写对应的 **Token**，并将回调地址设为 `https://你的域名/auth/wechat/code/callback`
+
+    可以用密码管理器生成，或在 PowerShell 运行 `openssl rand -hex 16` 生成 32 位值。请保密，不要把真实值发到聊天或提交到 Git。
+    
+    
+    
+问：
+
+
+    是不是微信公众号后台的配置消息推送表单中的EncodingAESKey？
+    我看到这个表单还有：URL、Token、消息加密方式（安全模式(推荐)/明文模式/兼容模式）、数据格式（XML）。
+    这个表单还提供了文档：https://developers.weixin.qq.com/doc/subscription/guide/dev/push/encryption.html
+    你看看
+  
+
+
+答：
+
+
+
+    不是 `EncodingAESKey`。`FMLYSYS_WECHAT_OA_TOKEN` 对应这个表单里的 **Token**：你自己生成一个 16–32 位字符串，把它同时填入公众号的 Token 栏和项目的 `data/config.env`，两边必须完全一致。
+
+    按当前项目的回调实现，表单应这样配置：
+
+    | 表单字段 | 填写内容 |
+    |---|---|
+    | URL | `https://你的域名/auth/wechat/code/callback` |
+    | Token | 你生成的随机字符串，同时设置为 `FMLYSYS_WECHAT_OA_TOKEN` |
+    | 消息加密方式 | **明文模式** |
+    | 数据格式 | **XML** |
+
+    `EncodingAESKey` 是用于微信消息加解密的密钥；当前代码没有实现这套加解密流程，所以不要把它当作 `FMLYSYS_WECHAT_OA_TOKEN`。回调会用 Token 校验微信请求签名，并直接解析 XML 消息，因此安全模式或兼容模式目前不适用。
+
+    我尝试打开你给的官方文档链接，但当前环境无法读取该页面；以上设置是根据项目现有回调代码确认的。
+  
+  
+
+问：
+
+
+    所以目前这个表单应该怎么选择？你说没有实现消息加解密
+    
+    
+    
+答：
+
+
+
+    这个表单按下面填写即可：
+
+    - **URL**：`https://你的公网域名/auth/wechat/code/callback`
+    - **Token**：填写你自己生成的 16–32 位随机字符串，并把同一个值配置到 `data/config.env` 的 `FMLYSYS_WECHAT_OA_TOKEN`
+    - **消息加密方式**：选择 **明文模式**
+    - **数据格式**：选择 **XML**
+    - **EncodingAESKey**：如果表单要求填写，就点“随机生成”并保留即可；明文模式下当前项目不会使用它，也不需要把它配置到项目里
+
+    回调地址必须能从公网通过 HTTPS 访问；`localhost` 或仅内网可访问的地址无法接收公众号推送。
+    
+    
+    
+问：
+
+
+    下一个问题：公众号是个人类型，没有认证，有没有能力开发自定义菜单，就是使用接口来生成公众号菜单？
+    
+    
+答：
+
+
+
+    如果你指的是用项目里的公众号 `AppID/AppSecret` 获取 `access_token`，再调用 `POST /cgi-bin/menu/create` 自动创建菜单：**未认证的个人订阅号通常没有这项接口权限**。能否在公众号后台手工配置菜单，和你的程序能否通过 API 创建菜单，是两回事。可以对照微信的[接口权限说明](https://developers.weixin.qq.com/doc/offiaccount/Getting_Started/Explanation_of_interface_privileges.html)和[自定义菜单创建接口文档](https://developers.weixin.qq.com/doc/offiaccount/Custom_Menus/Creating_Custom-Defined_Menu.html)。
+
+    通过微信开放平台的**第三方平台**获得公众号授权，可能有另一条代管菜单的路径，但需要第三方平台应用及相应授权，未认证账号的可用菜单能力也有限；这不是把当前项目的公众号 AppID/Secret 直接拿来调用就能实现的。
+
+    所以，就当前项目的公众号凭据而言，不能假设可以通过 API 自动生成菜单。若后台允许手工配置，可以手动发布；若要由程序管理，就需要先确认该账号获得了相应接口授权。
+    
+    
+    
+问：
+
+
+
+    既然没有这个权限，有没有曲线救国方案：我看到后台能手动定义菜单，有一个链接跳转的，能不能设置这边系统的链接，然后看看能不能带过来一些上下文信息来识别用户的？
+    
+    
+    
+    
+答：
+
+
+    我会把“菜单直接跳转链接”和“点击菜单事件推送”分开看：前者是否带 OpenID、后者能否经回调识别用户，决定了可行的曲线方案。也会核对当前项目回调实际处理了哪些事件。
+
+    运行了命令已搜索网页
+
+    **可以用菜单链接打开系统，但身份不会作为参数自动附加到这个网页请求上。**不过，微信还可以把菜单跳转产生的 `VIEW` 事件推送到公众号回调；事件里带有点击者的 `FromUserName`，也就是该公众号下的 OpenID。微信的[自定义菜单事件推送说明](https://developers.weixin.qq.com/doc/offiaccount/Custom_Menus/Custom_Menu_Push_Events.html)列出了这个事件。
+
+    所以可以尝试这条路径：手工把菜单设为跳转到系统登录页；用户点击后，回调收到 `VIEW` 事件并识别其 OpenID；系统再发一个短时、一次性的登录凭证，让用户在网页输入或打开它完成登录。**菜单 URL 本身仍是所有人共用的固定链接**，不能拿它的静态参数来识别具体用户。
+
+    当前项目的回调已经接收公众号事件，但只处理扫码和关注事件，没有处理 `VIEW`；因此这条登录流程还需要开发。能否从你手工发布的菜单收到 `VIEW` 事件，最好用公众号实际点一次验证。即使收到事件，要自动对应到 FmlySys 成员，也还需要该公众号 OpenID 已绑定成员，或能通过 UnionID 匹配。    
+    
+
+
+问：
+
+
+
+    你提到【当前项目的回调已经接收公众号事件，但只处理扫码和关注事件，没有处理 VIEW；因此这条登录流程还需要开发。能否从你手工发布的菜单收到 VIEW 事件，最好用公众号实际点一次验证。  】，你可以做个小工具放到后台（加个开发中心菜单）给我验证到底能不能实现。
+    最后，
+    你把完整的微信验证码登录的文档编写出来，包括如何从新接入到维护，以及我提到的后续未认证个人公众号如何曲线救国使用系统菜单回调本系统携带上下文参数拿到用户信息的方法
+
+
+
+
+答：
+
+
+
+    我会在当前功能分支继续做：加一个仅管理员可见的“开发中心”，用于触发并观察公众号菜单 VIEW 回调；同时补齐从配置、联调到日常维护的微信验证码登录文档，并把未认证个人号的菜单回调登录方案写清楚。我先核对分支、已有改动和项目约定，避免覆盖你工作区里的内容。
+
+    编辑了文件运行了命令
+
+    追问：
+    __________________________
+        顺带提个BUG：
+        我在线上 点击微信验证码登录，跳转到 /login/wechat-code 但cloudflare提示bad gateway。我在测试环境打开 这个链接，提示 Cannot GET /login/wechat-code
+    __________________________
+    
+    18:31
+
+    编辑了文件
+
+    收到，这个现象我也会纳入本次排查。当前分支的 Go 服务确实注册了 GET /login/wechat-code；若它返回 Cannot GET，更像是请求落到了未包含此路由的旧版/另一层服务。Cloudflare 的 502 则通常表示上游服务不可达或报错。我会用本地路由测试确认当前构建应有的响应，并把这两种部署症状补进指南。
+
+    编辑了文件运行了命令
+
+    开发中心页面、管理员专用事件接口和回调事件内存缓冲已经接上；菜单验证用 /healthz?source=wechat-menu-view-test，这样即使微信内置浏览器保护拦截普通页面，也能单独验证 VIEW 回调。接下来我在跑路由、回调和模板检查，并确认部署异常的说明与实际路由行为一致。
+
+    编辑了文件运行了命令
+
+    我确认了两点：当前源码的登录页路由确实存在，而且微信内置浏览器会被项目现有保护页拦截；/healthz 则专门绕过这层保护，所以菜单探针不会受影响。Go 的 HTTP 服务和模板测试已通过，刚加的 JS 也通过语法检查；线上 502 仍需部署侧查看源站连通性才能定因。
+
+    运行了命令
+
+    已在 `dev-2609A-step2-fake-wechat-qrlogin` 加入管理员“开发中心”和完整接入指南，未暂存、未提交。
+
+    登录管理员后台后打开 **`/admin/developer`**。按页面说明，把公众号手工菜单的“跳转网页”地址设为：
+
+    `https://你的公网域名/healthz?source=wechat-menu-view-test`
+
+    点击菜单后，开发中心会显示收到的公众号事件。若出现 `VIEW`，列表里的 `FromUserName` 就是点击者在该公众号下的 OpenID；微信官方的[菜单事件文档](https://developers.weixin.qq.com/doc/offiaccount/Custom_Menus/Custom_Menu_Push_Events.html)也列出了该字段。事件记录只保留内存中的最近 50 条，仅管理员可查看；重启服务后清空。这个工具验证的是回调是否收到身份信息，**还不会通过菜单直接登录**。
+
+    菜单 URL 本身不会自动带上每位用户不同的 OpenID。指南说明了后续可行的方案：回调收到 `VIEW` 和 OpenID 后，通过公众号回复短时、一次性的登录凭证；用户再用凭证完成网页登录。它也列出了成员绑定、并发防串号和微信内置浏览器保护等上线前条件。
+
+    完整文档在[微信验证码登录指南](D:/Workspace/github/Ltre/FmlySys/doc/wechat-code-login.md)，开发记录已更新到[devlog](D:/Workspace/github/Ltre/FmlySys/doc/devlog/devlog-2609-features.md)。
+
+    关于你报告的路由问题：当前工作区的 Go 服务已注册 `GET /login/wechat-code`，并增加了路由注册测试。该路由在配置缺失时应返回配置提示页；从微信内置浏览器打开时，当前版本会显示“请在手机自带浏览器中打开”的保护页。`Cannot GET` 表示测试环境请求没有到达包含此路由的服务；Cloudflare 502 需要检查线上源站进程和代理 upstream，我没有线上域名或源站日志，无法替你确认具体故障点。
+
+    验证通过：`go test ./internal/httpserver ./web`、新开发中心脚本的 `node --check`。这些测试不能代替公众号实测；实际是否收到 `VIEW`，需要你点击手工菜单后看开发中心事件列表。
+
+    本次修改的 Git 文案：
+
+    **Title**
+
+    ```text
+    新增公众号回调开发中心与验证码登录指南
+    ```
+
+    **Description**
+
+    ```text
+    增加管理员开发中心，记录近期通过签名校验的公众号事件，用于验证手工菜单 VIEW 回调及 OpenID；补充事件捕获和登录路由注册测试。完善微信验证码登录的接入、配置、维护、排障文档，并说明未认证个人公众号通过菜单回调获取身份时的限制与一次性凭证方案。记录 /login/wechat-code 的部署排查方法。
+    ```
+
+    工作区还显示 `go.mod`、`go.sum` 的既有改动，以及 `doc/prompt/prompt-2609A.md` 的会话记录改动；我没有覆盖或暂存它们。
+
+    已编辑 12 个文件+324-6查看变更撤销查看变更
+
+    internal/httpserver/admin_enhancements.gointernal/httpserver/admin_enhancements.go+5-3
+    internal/httpserver/server.gointernal/httpserver/server.go+5-0
+    internal/httpserver/wechat_code_login.gointernal/httpserver/wechat_code_login.go+3-0
+    web/templates/dashboard.htmlweb/templates/dashboard.html+4-3
+    internal/httpserver/wechat_developer_center.gointernal/httpserver/wechat_developer_center.go+66-0
+    web/static/admin-developer.cssweb/static/admin-developer.css+16-0
+    web/static/admin-developer.jsweb/static/admin-developer.js+67-0
+    web/templates/admin-developer.htmlweb/templates/admin-developer.html+6-0
+    internal/httpserver/wechat_code_login_test.gointernal/httpserver/wechat_code_login_test.go+38-0
+    README.mdREADME.md+2-0
+    doc/devlog/devlog-2609-features.mddoc/devlog/devlog-2609-features.md+10-0
+    doc/wechat-code-login.mddoc/wechat-code-login.md+102-0
+
+
+
+---------------------------
 
 问：
 
