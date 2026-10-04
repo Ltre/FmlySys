@@ -598,6 +598,119 @@
 
 
 
+问：
+
+
+    菜单的 跳转网页 只能设置公众号链接，无法使用自定义网址的。
+    所以菜单这块开发就没啥意义了
+    
+    
+答：
+
+
+    
+    明白。既然你确认个人未认证号的菜单目标只能选公众号内部链接，先前的探针地址就无法作为菜单目标，也不能验证“菜单直接打开 FmlySys”的登录链路。我会撤掉这次新增的开发中心和事件探针，把指南改成明确说明该账号限制、现有二维码登录可用路径，以及账号权限变化后才适用的方案；登录路由问题的排查内容会保留。
+
+    上下文已自动压缩
+
+    明白，菜单验证工具确实无法解决“菜单不能指向系统网址”的限制。我会把这部分试验代码撤掉，保留有用的登录路由回归测试，并把文档改成明确说明当前公众号条件下这条菜单方案不可用；/login/wechat-code 的部署排查仍会保留。
+
+    编辑了文件读取文件运行了命令
+
+    开发中心和事件探针已撤下；二维码验证码登录本身及 /login/wechat-code 路由测试保留。接下来我在核对最终差异，确认文档不再把菜单探针写成已提供功能，并确保测试环境的 Cannot GET 结论有代码依据。
+
+    编辑了文件读取文件运行了命令
+
+    已按你的实际情况撤下公众号菜单开发中心、`VIEW` 事件探针及后台入口。指南现在说明：菜单只能跳转公众号链接时，无法直接打开 FmlySys，固定链接也不会自动把 OpenID 带到网站；当前可用的登录方式仍是二维码验证码登录。开发记录已补上撤销原因和验证结果。
+
+    关于登录页 BUG，当前代码已注册 `GET /login/wechat-code`。配置缺失时，Go 处理器应返回说明页面和 HTTP 503；测试环境出现 `Cannot GET`，通常说明请求到了旧版或另一套服务，或代理转发目标不对。Cloudflare 的 502 还需结合源站和代理日志定位，我无法从本地确认线上源站状态。排查说明见[微信验证码登录指南](<D:/Workspace/github/Ltre/FmlySys/doc/wechat-code-login.md>)，过程记录见[开发日志](<D:/Workspace/github/Ltre/FmlySys/doc/devlog/devlog-2609-features.md>)。
+
+    `go test ./internal/httpserver ./web` 通过，`git diff --check` 通过。仍在 `dev-2609A-step2-fake-wechat-qrlogin` 分支；没有暂存或提交。工作区原有的 `go.mod`、`go.sum` 和 prompt 文档修改保持原样。
+
+    **Title**
+
+    ```text
+    撤销不可用的公众号菜单事件探针
+    ```
+
+    **Description**
+
+    ```text
+    移除因个人公众号菜单只能跳转公众号链接而无法打开 FmlySys 的开发中心、VIEW 事件探针和后台入口。更新微信验证码登录指南，说明菜单链接限制、现有二维码验证码登录流程及相关排障方法，并在开发日志记录撤销原因和验证结果。保留 /login/wechat-code 路由注册测试及部署环境 Cannot GET、Cloudflare 502 的排查结论。
+    ```
+
+    已编辑 12 个文件+17-229查看变更撤销查看变更
+
+    README.mdREADME.md+1-1
+    internal/httpserver/admin_enhancements.gointernal/httpserver/admin_enhancements.go+0-2
+    internal/httpserver/server.gointernal/httpserver/server.go+0-5
+    internal/httpserver/wechat_code_login.gointernal/httpserver/wechat_code_login.go+0-3
+    internal/httpserver/wechat_code_login_test.gointernal/httpserver/wechat_code_login_test.go+0-28
+    internal/httpserver/wechat_developer_center.gointernal/httpserver/wechat_developer_center.go+0-66
+    web/static/admin-developer.cssweb/static/admin-developer.css+0-16
+    web/static/admin-developer.jsweb/static/admin-developer.js+0-67
+    web/templates/admin-developer.htmlweb/templates/admin-developer.html+0-6
+    web/templates/dashboard.htmlweb/templates/dashboard.html+0-1
+    doc/devlog/devlog-2609-features.mddoc/devlog/devlog-2609-features.md+5-5
+    doc/wechat-code-login.mddoc/wechat-code-login.md+11-29
+
+
+
+问：
+
+
+
+    我会把“开发中心”改成面向这个 502 问题的诊断页：管理员能查看近期相关请求是否到达 Go 服务、状态码、耗时和请求来源，并提供手机可打开的探测地址。若 Cloudflare 在请求到达源站前就返回 502，页面也会明确显示这一点，避免把边缘网关错误误判成应用日志。
+
+    编辑了文件读取文件运行了命令
+    
+    诊断页已接入请求状态采集，并补上二维码生成失败时的脱敏错误分类。这样能分清两种情况：Go 服务自身返回 502（可看到请求和错误类别），或者请求根本没有到达这台 Go 服务（要查 Cloudflare/WAF/反代日志）。现在我在做最后的测试和差异检查。
+
+    编辑了文件读取文件运行了命令
+
+    已在后台“开发中心”加入微信验证码登录诊断页。部署此分支后，用手机系统浏览器登录管理员后台并打开 `/admin/developer`，依次点击“测试本站源站”和“测试微信验证码登录”，再返回页面看记录：
+
+    - 源站探测显示 `FmlySys origin reachable`，说明请求到达了提供探测响应的 FmlySys 服务。
+    - 登录记录显示 **502**，且有“错误”说明，表示 Go 服务收到了请求并在生成二维码或保存登录状态时返回了错误；说明会显示脱敏后的网络错误类别、HTTP 状态或微信错误码。
+    - 没有对应记录，且期间没有重启或切换服务实例，通常表示请求没有到达当前 Go 服务；需要查 Cloudflare、WAF、反向代理或部署目标。应用无法读取未到达源站的边缘日志。
+
+    诊断记录只保留当前进程最近 100 条，重启后清空；不记录 Cookie、表单、客户端 IP 或普通查询参数。手机如果是在微信内置浏览器中操作，请先选“在浏览器打开”。这项工具随当前分支代码部署后才可用。
+
+    验证通过：`go test ./internal/httpserver ./web ./cmd/fmlysys`、`node --check web/static/admin-developer.js`。诊断实现见[request_diagnostics.go](D:/Workspace/github/Ltre/FmlySys/internal/httpserver/request_diagnostics.go:42)，使用说明见[微信验证码登录指南](D:/Workspace/github/Ltre/FmlySys/doc/wechat-code-login.md:72)，开发记录见[开发日志](D:/Workspace/github/Ltre/FmlySys/doc/devlog/devlog-2609-features.md:120)。
+
+    仍在 `dev-2609A-step2-fake-wechat-qrlogin` 分支，未暂存或提交。工作区原有的 `doc/prompt/prompt-2609A.md`、`go.mod` 和 `go.sum` 修改保持原样；全量 `git diff --check` 会报告 prompt 文档原有的行尾空白，本次涉及文件的定向检查通过。
+
+    **Title**
+
+    ```text
+    增加微信登录手机端诊断工具
+    ```
+
+    **Description**
+
+    ```text
+    在后台开发中心增加微信验证码登录诊断页，提供源站探测和带临时编号的登录页测试链接，并记录相关请求的状态码、耗时、代理协议和 Cloudflare Ray ID。对二维码生成失败记录脱敏后的错误类别，帮助区分应用返回的 502 与请求未到达 Go 服务的网关问题。日志仅保存在进程内存中，并由管理员权限保护。
+    ```
+
+    已编辑 15 个文件+701-10查看变更撤销查看变更
+
+    cmd/fmlysys/main.gocmd/fmlysys/main.go+2-1
+    internal/httpserver/admin_enhancements.gointernal/httpserver/admin_enhancements.go+2-0
+    internal/httpserver/server.gointernal/httpserver/server.go+4-0
+    internal/httpserver/wechat_browser_guard.gointernal/httpserver/wechat_browser_guard.go+1-1
+    web/templates/dashboard.htmlweb/templates/dashboard.html+1-0
+    internal/httpserver/request_diagnostics.gointernal/httpserver/request_diagnostics.go+223-3
+    internal/httpserver/wechat_code_login.gointernal/httpserver/wechat_code_login.go+4-0
+    web/static/admin-developer.cssweb/static/admin-developer.css+217-3
+    web/static/admin-developer.jsweb/static/admin-developer.js+83-0
+    web/templates/admin-developer.htmlweb/templates/admin-developer.html+58-0
+    internal/httpserver/request_diagnostics_test.gointernal/httpserver/request_diagnostics_test.go+83-0
+    README.mdREADME.md+1-1
+    doc/devlog/devlog-2609-features.mddoc/devlog/devlog-2609-features.md+8-0
+    doc/wechat-code-login.mddoc/wechat-code-login.md+13-0
+    internal/httpserver/wechat_browser_guard_test.gointernal/httpserver/wechat_browser_guard_test.go+1-1
+
+
 ---------------------------
 
 问：
