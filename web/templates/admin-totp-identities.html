@@ -1,0 +1,23 @@
+{{define "admin-totp-identities.html"}}<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title><link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/mobile.css"></head>
+<body>{{template "nav" .}}
+<main class="wrap">
+  <div class="section-head"><div><h1>2FA 登录身份管理</h1><p class="muted">管理员：{{.AdminUsername}} · 当前数据分区：{{.ActivePartition}}</p></div></div>
+  <section class="card">
+    <p class="muted">新注册身份默认不关联家庭成员。请根据用户名和补充备注核实身份，再关联到对应成员；解绑后，该身份不能进入家庭系统。</p>
+    <div class="table-scroll"><table>
+      <thead><tr><th>ID</th><th>用户名</th><th>2FA 补充备注</th><th>注册时间</th><th>关联成员</th></tr></thead>
+      <tbody>
+      {{range .Identities}}{{$identity := .}}
+      <tr>
+        <td>#{{.ID}}</td><td><code>{{.Username}}</code></td><td>{{if .ProfileRemark}}{{.ProfileRemark}}{{else}}—{{end}}</td><td>{{humanDate .CreatedAt}}</td>
+        <td><form method="post" action="/admin/2fa-identities/{{.ID}}/bind" class="form compact-form"><select name="member_id"><option value="0">未关联成员</option>{{range $.Members}}<option value="{{.ID}}" {{if eq .ID $identity.MemberID}}selected{{end}}>#{{.ID}} {{.Name}} {{.Relation}}</option>{{end}}</select><button>保存关联</button></form>{{if .MemberID}}<p class="muted">当前：#{{.MemberID}} {{.MemberName}}</p>{{else}}<p class="muted">等待管理员核实并关联</p>{{end}}</td>
+      </tr>
+      {{else}}<tr><td colspan="5">当前没有 2FA 登录身份。</td></tr>{{end}}
+      </tbody>
+    </table></div>
+  </section>
+</main>
+</body>
+</html>{{end}}

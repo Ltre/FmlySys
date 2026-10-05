@@ -26,7 +26,7 @@ import (
 
 const (
 	passwordIterations  = 210000
-	adminSessionTTL      = 12 * time.Hour
+	adminSessionTTL     = 12 * time.Hour
 	CredentialsFilename = "admin-credentials.enc"
 	credentialsVersion  = 1
 )
@@ -555,6 +555,16 @@ func (s *Service) decrypt(encoded string) (string, error) {
 	}
 	plain, err := gcm.Open(nil, b[:gcm.NonceSize()], b[gcm.NonceSize():], nil)
 	return string(plain), err
+}
+
+// EncryptTOTPSecret protects member TOTP seeds with the same persistent master
+// key used for administrator authenticator secrets.
+func (s *Service) EncryptTOTPSecret(secret string) (string, error) {
+	return s.encrypt(secret)
+}
+
+func (s *Service) DecryptTOTPSecret(encoded string) (string, error) {
+	return s.decrypt(encoded)
 }
 
 func hashPassword(password string) (string, error) {

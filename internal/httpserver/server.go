@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
@@ -36,13 +37,15 @@ const (
 )
 
 type Server struct {
-	PM         *partition.Manager
-	Store      *store.Store
-	Admin      *adminauth.Service
-	Config     config.Config
-	DevActorID int64
-	Templates  *template.Template
-	mux        *http.ServeMux
+	PM              *partition.Manager
+	Store           *store.Store
+	Admin           *adminauth.Service
+	Config          config.Config
+	DevActorID      int64
+	Templates       *template.Template
+	mux             *http.ServeMux
+	totpLoginRateMu sync.Mutex
+	totpLoginRate   map[string]totpLoginRateBucket
 }
 
 type view struct {
@@ -111,7 +114,7 @@ func New(pm *partition.Manager, st *store.Store, admin *adminauth.Service, cfg c
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{PM: pm, Store: st, Admin: admin, Config: cfg, DevActorID: devActorID, Templates: t, mux: http.NewServeMux()}
+	s := &Server{PM: pm, Store: st, Admin: admin, Config: cfg, DevActorID: devActorID, Templates: t, mux: http.NewServeMux(), totpLoginRate: make(map[string]totpLoginRateBucket)}
 	s.routes()
 	return s, nil
 }
@@ -135,6 +138,10 @@ func (s *Server) routes() {
 
 	// Member authentication and join request flow.
 	s.mux.HandleFunc("GET /login", s.loginPage)
+	s.mux.HandleFunc("GET /login/2fa", s.totpLoginPage)
+	s.mux.HandleFunc("POST /auth/2fa/login", s.totpLogin)
+	s.mux.HandleFunc("POST /auth/2fa/register", s.totpRegister)
+	s.mux.HandleFunc("GET /auth/2fa/register/qr", s.totpRegisterQRCode)
 	s.mux.HandleFunc("POST /login/dev", s.devLogin)
 	s.mux.HandleFunc("GET /login/wechat", s.wechatLogin)
 	s.mux.HandleFunc("GET "+WeChatCallbackPath, s.wechatCallback)
@@ -184,6 +191,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin/authorities", s.adminOnly(s.adminAuthorities))
 	s.mux.HandleFunc("POST /admin/members", s.adminOnly(s.adminCreateMember))
 	s.mux.HandleFunc("POST /admin/members/{id}/permissions", s.adminOnly(s.adminSetPermissions))
+	s.mux.HandleFunc("GET /admin/2fa-identities", s.adminOnly(s.adminTOTPLoginIdentities))
+	s.mux.HandleFunc("POST /admin/2fa-identities/{id}/bind", s.adminOnly(s.adminBindTOTPLoginIdentity))
 	s.mux.HandleFunc("POST /admin/join/{id}/approve", s.adminOnly(s.adminApproveJoin))
 	s.mux.HandleFunc("POST /admin/join/{id}/reject", s.adminOnly(s.adminRejectJoin))
 	s.mux.HandleFunc("POST /admin/assets/events", s.adminOnly(s.adminCreateAssetEvent))

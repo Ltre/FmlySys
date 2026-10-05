@@ -83,3 +83,27 @@ Add a minimize control that saves the current timeline page and reading position
 
 Put the financial timeline first in the assets quick menu and ensure older asset movement records remain available as jump targets.
 ```
+
+## 2FA 动态验证码登录与注册
+
+日期：2026-10-05
+分支：`dev-2609A-step3-2fa-login`
+
+### 需求与实现方案
+
+在普通登录页增加“通过 2FA 登录”入口，进入默认选中“登录”的双选项卡界面。登录表单以用户名和验证器生成的 6 位 TOTP 动态码完成认证；注册表单收集用户名、可选补充备注、绑定二维码和动态码。二维码使用 `otpauth://totp`，标签按 `Fmly: 用户名 [补充备注]` 更新，补充备注为空时省略方括号部分。空用户名时不生成二维码；用户名或备注变化时先隐藏旧码，再刷新二维码，服务端保持同一个短时注册密钥。页面显示服务端随二维码响应返回的完整标签，便于核对扫码内容。
+
+2FA 身份单独存储，不自动创建成员或授予家庭权限。注册成功后由管理员在“2FA 身份”后台页面将身份关联到有效家庭成员；登录仅在关联有效时创建现有成员会话。2FA 种子使用现有持久主密钥 AES-GCM 加密，注册二维码状态使用短时 HttpOnly Cookie 和哈希 token 保存，验证码按 TOTP 时间步原子消费以阻止重放，并对登录尝试按 IP 和用户名/IP 限流。
+
+### 修改内容
+
+- 新增分区迁移和 Store 方法，保存加密 TOTP 种子、注册临时状态、成员关联与最近消费时间步。
+- 新增 `/login/2fa` 登录/注册页面、动态二维码接口、注册与登录处理，以及管理员身份列表和成员关联操作。
+- 在普通登录页添加“通过 2FA 登录”入口，在后台导航加入“2FA 身份”管理入口。
+- 注册错误回显时默认回到注册选项卡；选项卡支持左右方向键切换。
+
+### 安全边界与检查
+
+未关联成员的注册身份不能进入家庭系统；管理员解绑或关联成员失效后不能登录。登录在一个数据库事务中校验仍有效的成员关联、消费当前 TOTP 时间步并创建成员会话，避免并发解绑导致身份越权。验证码密钥不通过 URL 或表单明文存入数据库。
+
+对 Go 文件执行 `gofmt`，`go build ./...`、`node --check web/static/totp-login.js` 和 `git diff --check` 均通过。本轮未运行测试、未执行 `git add`，未创建 Git commit；工作区原有 `go.mod` 与 `go.sum` 改动保留，不属于本功能改动。
