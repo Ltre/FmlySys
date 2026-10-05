@@ -53,6 +53,7 @@ if not exist "%FMLYSYS_CONFIG_FILE%" (
     >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_WECHAT_OA_APP_ID=
     >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_WECHAT_OA_APP_SECRET=
     >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_WECHAT_OA_TOKEN=
+    >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_WECHAT_OA_QR_CODE_URL=/static/shabigongzhonghao.jpg
     >>"%FMLYSYS_CONFIG_FILE%" echo FMLYSYS_MASTER_KEY=
     echo [FmlySys] Created local config template: %FMLYSYS_CONFIG_FILE%
 )

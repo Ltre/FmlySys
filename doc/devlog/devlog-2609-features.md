@@ -136,3 +136,11 @@ Put the financial timeline first in the assets quick menu and ensure older asset
 为后续确认出站路径，微信 HTTP trace 增加代理 URL、DNS 结果、TCP connect 目标、本地/远端 socket、连接是否复用、TLS 服务名/版本及连接错误。后台表格的“来源信息”和原始 JSON 都会显示这些字段：直连时远端通常是微信边缘地址，使用 `HTTPS_PROXY` 时远端通常是代理地址。Cloudflare CDN 只影响访问 FmlySys 的入站流量；NAT 或上游代理后的最终公网出口地址无法从本机 socket 反推，应以微信 `40164` 回显或同代理链路的出口探测结果为准。后台对二维码接口的 `48001` 和微信 API 的 `40164` 增加直接判断提示。
 
 验证：`go test ./internal/httpserver ./internal/wechat ./web ./cmd/fmlysys`、`node --check web/static/admin-developer.js` 和 `git diff --check` 均通过；网络 trace 测试确认能够捕获实际 socket 本地/远端地址和 connect 目标。未执行 `git add`，未提交。
+
+### 静态公众号二维码与 OpenID 验证码登录
+
+用户质疑在个人公众号无法调用动态二维码接口时，静态二维码加公众号消息验证码是否能完整替代原流程，并提出在新关注时直接回复验证码、已关注用户在网站提示发送“登录”。结论是：不再调用 `/cgi-bin/qrcode/create`、而通过已配置的消息推送回调发放一次性验证码是可行实现；但静态二维码不携带每次网页独有的 scene，因此无法把验证码绑定到某个浏览器页。验证码只能与 `FromUserName` 对应的 OA OpenID 关联，属于短时 bearer credential，必须提醒勿转发，并做单次消费、五分钟到期、每 OpenID 冷却、错误次数和提交频率限制。真实账号是否接收 subscribe 与文本回调、以及 OA OpenID 是否能通过现有绑定或 UnionID 匹配成员，仍需上线前用该个人公众号实际验证；代码无法替代这项账号实测。
+
+实现已将 `/login/wechat-code` 改为本地渲染，不向微信请求 token 或动态二维码。`FMLYSYS_WECHAT_OA_QR_CODE_URL` 默认显示仓库内的 `/static/shabigongzhonghao.jpg`，也允许替换为 HTTPS 图片 URL 或站内路径。`subscribe` / `SCAN` 回调立即同步回复验证码，已关注用户的“登录”文本回调也发放验证码。数据库新增 `000012_wechat_openid_login_codes.sql`，按 OpenID 保存 HMAC 摘要和时效；成功兑换后原子消费并按 OpenID/UnionID 匹配已审核成员。页面的 state cookie 继续防跨站提交，但不被误称为验证码的浏览器绑定。
+
+同时补齐 Windows/Linux 首次配置模板、README、登录页说明及 `doc/wechat-code-login.md` 接入、回调和排障文档。保留旧的动态场景尝试表和 API 客户端方法供数据库升级及历史代码兼容，但新登录页不再调用它们。当前 turn 按环境约束未运行或新增测试；后续部署仍应实测公众号 `subscribe` 被动回复、已关注用户文本回复和 OpenID/UnionID 成员匹配。未执行 `git add`，未提交。

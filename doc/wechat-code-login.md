@@ -4,21 +4,21 @@
 
 ## 登录流程
 
-用户从 FmlySys 登录页打开“微信验证码登录”后，服务端为这次浏览器登录生成随机状态和场景值，向公众号申请一个十分钟有效的临时二维码。扫码产生的 `subscribe` 或 `SCAN` 事件把公众号 OpenID 绑定到这次浏览器尝试。用户在公众号发送“登录”后，公众号回复一个八位数字验证码；用户在原浏览器输入验证码后，服务端才签发成员会话。
+用户从 FmlySys 登录页打开“微信验证码登录”后，扫描公众号的静态二维码关注账号。新关注用户会在 `subscribe` 回调中直接收到八位验证码；已经关注的用户在公众号对话中发送“登录”获取验证码。验证码在服务端与回调中的公众号 OpenID 关联，用户把它填入登录页后，服务端按该 OpenID（或可匹配的 UnionID）查找成员并签发会话。
 
-验证码五分钟有效，只能使用一次，只能兑换扫码时对应的浏览器状态；错误尝试达到五次后，该次登录失效。二维码过期、验证码过期、频率限制或成员身份未绑定时，用户需要按页面提示重新开始。该流程不会自动创建、审批成员，也不会绕过已有的成员权限。
+验证码五分钟有效、只能使用一次，并不绑定到某个浏览器页；它是短时登录凭证，任何拿到验证码的人都可能先兑换，因此页面和公众号回复都会提醒不要转发。浏览器登录状态用于防止跨站伪造提交，单个状态最多接受五次错误输入；登录提交另按客户端 IP 限制为每五分钟最多二十次（进程内计数）。验证码过期、频率受限或成员身份未绑定时，用户按提示重新获取或先完成成员绑定。该流程不会自动创建、审批成员，也不会绕过已有的成员权限。
 
 公众号回调的 `FromUserName` 是该公众号下的 OpenID。它不一定与网站微信应用的 OpenID 相同。FmlySys 会尽量通过 UnionID 匹配已审核成员；公众号与网站微信应用通常需要绑定到同一个微信开放平台账号，才能拿到可跨应用匹配的 UnionID。若没有 UnionID，系统只接受完全相同的 OpenID。没有可匹配的已绑定成员时，登录会被拒绝。
 
 ## 与微信服务器的完整交互
 
-登录页生成二维码时，浏览器请求 FmlySys 的 `GET /login/wechat-code`。服务端生成随机网页 state 和二维码 scene，并设置只用于该登录路径的 state Cookie。随后公众号 API 客户端按需请求 `GET https://api.weixin.qq.com/cgi-bin/token` 获取或刷新 `access_token`，再以 `POST https://api.weixin.qq.com/cgi-bin/qrcode/create?access_token=...` 提交 `QR_STR_SCENE`、scene 和 600 秒有效期。二维码接口返回的 ticket 被用于构造微信二维码展示地址。token 会在进程内缓存，未过期时不会每次都请求 token 接口。
+登录页请求 `GET /login/wechat-code` 时，服务端只生成随机网页 state、短期浏览器状态记录和 HttpOnly state Cookie，不调用公众号二维码接口或获取 `access_token`。默认展示仓库中的公众号静态二维码 `/static/shabigongzhonghao.jpg`；部署方可用 `FMLYSYS_WECHAT_OA_QR_CODE_URL` 改为其他 HTTPS 图片 URL 或站内绝对路径。这样可避开当前账号无权调用 `/cgi-bin/qrcode/create` 返回的 `48001`。
 
-微信公众平台验证服务器地址时向回调发送 `GET /auth/wechat/code/callback`，带上 `signature`、`timestamp`、`nonce` 和 `echostr`。服务端按字典序排列 Token、timestamp、nonce，计算 SHA-1 并校验签名，然后原样返回 `echostr`。后续公众号事件以 `POST` 和 XML 正文发送到同一路径；服务端再次校验签名、限制正文最大 1 MiB 并解析 XML。`subscribe` 或 `SCAN` 事件中的 `EventKey` 与网页申请的 scene 匹配后，`FromUserName`（公众号 OpenID）被绑定到该网页登录尝试。已关注用户的扫码事件可能直接携带 scene，新关注用户的 scene 可能带 `qrscene_` 前缀。
+微信公众平台验证服务器地址时向回调发送 `GET /auth/wechat/code/callback`，带上 `signature`、`timestamp`、`nonce` 和 `echostr`。服务端按字典序排列 Token、timestamp、nonce，计算 SHA-1 并校验签名，然后原样返回 `echostr`。后续公众号事件以 `POST` 和 XML 正文发送到同一路径；服务端再次校验签名、限制正文最大 1 MiB 并解析 XML。新关注的 `subscribe` 事件以及关注后的 `SCAN` 事件会读取 `FromUserName`（公众号 OpenID），生成验证码并将其 HMAC 摘要及 OpenID 写入数据库；随后用同一回调响应一个明文 XML 文本消息。这里不需要客服消息 API，也不使用二维码事件里的 `EventKey`。
 
-用户在公众号发送“登录”后，微信把文本消息再次 POST 到回调。FmlySys校验其 `FromUserName` 已绑定有效网页尝试，再生成八位验证码，把验证码摘要写入数据库，并通过本次回调的 XML 文本回复把验证码返回给用户。这里是微信服务器发起的入站回调及 FmlySys 的同步 XML 响应；当前实现没有调用微信“客服消息”发送 API。用户将验证码提交到 `POST /auth/wechat/code/login` 后，服务端检查 state Cookie 并一次性消费验证码，再按需调用 `GET https://api.weixin.qq.com/cgi-bin/user/info` 读取 OpenID/UnionID，匹配已绑定成员后设置 `fmly_session` Cookie。
+已关注用户发送“登录”后，微信将文本消息 POST 到同一回调；FmlySys 直接根据 `FromUserName` 发放验证码，并在回调 XML 中回复。验证码只保存 HMAC 摘要，有效期五分钟，同一 OpenID 30 秒内不能重复申请。用户提交到 `POST /auth/wechat/code/login` 后，服务端校验 state Cookie 和验证码并原子地一次性消费，再按需请求 `GET https://api.weixin.qq.com/cgi-bin/user/info` 获取 UnionID。若该接口无权限或没有 UnionID，系统只尝试完全相同的公众号 OpenID 绑定；身份不匹配则拒绝登录。成功后设置 `fmly_session` Cookie。
 
-后台诊断会同时捕获出站 token、二维码、用户信息 API 的方法、完整 URL、请求 Headers/正文、HTTP 状态、响应 Headers/正文、耗时和传输/API 错误；也会捕获回调 GET/POST 的原始查询、请求 Headers/正文和 FmlySys 返回的 Headers/正文。微信 API 的成功响应和公众号成功回调也会记录，以便还原完整往返过程。已有的网页登录 OAuth 回调 `/auth/wechat/callback` 及其 `sns/oauth2/access_token`、`sns/userinfo` 出站请求也纳入同一诊断。出站网络 trace 还包括实际采用的代理 URL、DNS 结果、TCP 连接目标、本地/远端 socket 地址、连接复用状态和 TLS 版本。二维码接口 URL 含 `access_token`，token 获取 URL 含 AppID/AppSecret；OAuth URL 还可能含授权 code 和 secret；回调 XML 和登录提交内容也可能含 OpenID、验证码、Cookie 或其他身份信息。
+后台诊断会捕获实际发生的微信出站 API（目前登录页不再请求 token 或二维码生成接口）、用户信息 API 的方法、完整 URL、请求 Headers/正文、HTTP 状态、响应 Headers/正文、耗时和传输/API 错误；也会捕获回调 GET/POST 的原始查询、请求 Headers/正文和 FmlySys 返回的 Headers/正文。微信 API 的成功响应和公众号成功回调也会记录，以便还原完整往返过程。已有的网页登录 OAuth 回调 `/auth/wechat/callback` 及其 `sns/oauth2/access_token`、`sns/userinfo` 出站请求也纳入同一诊断。出站网络 trace 还包括实际采用的代理 URL、DNS 结果、TCP 连接目标、本地/远端 socket 地址、连接复用状态和 TLS 版本。OAuth URL 可能含授权 code 和 secret；回调 XML 和登录提交内容也可能含 OpenID、验证码、Cookie 或其他身份信息。
 
 ## 新接入
 
@@ -36,11 +36,12 @@
 FMLYSYS_WECHAT_OA_APP_ID=公众号AppID
 FMLYSYS_WECHAT_OA_APP_SECRET=公众号AppSecret
 FMLYSYS_WECHAT_OA_TOKEN=自行生成的随机字符串
+FMLYSYS_WECHAT_OA_QR_CODE_URL=/static/shabigongzhonghao.jpg
 ```
 
 `FMLYSYS_WECHAT_OA_TOKEN` 是回调签名用的 Token，不是 `EncodingAESKey`。按当前程序校验规则，它需要是 16–32 个可见 ASCII 字符。生成随机值，并在公众号后台 Token 栏与此配置中填写同一个值。不要把实际密钥写进 Git、工单或聊天记录。
 
-修改配置后重启 FmlySys。登录页出现“微信验证码登录”入口，表示必要配置已加载；它并不代表公众号 API 权限和回调联通性已经验证。
+`FMLYSYS_WECHAT_OA_QR_CODE_URL` 默认就是 `/static/shabigongzhonghao.jpg`，该图片随程序静态资源提供。只有更换二维码时才需覆盖此值；可使用 HTTPS 图片 URL 或站内绝对路径。修改配置后重启 FmlySys。登录页出现“微信验证码登录”入口，表示必要配置已加载；它并不代表公众号服务器回调已联通。
 
 ### 3. 配置公众号消息推送
 
@@ -60,10 +61,10 @@ FMLYSYS_WECHAT_OA_TOKEN=自行生成的随机字符串
 
 ## 日常使用与身份绑定
 
-1. 用户访问 `/login/wechat-code`，页面为当前浏览器申请临时二维码。
-2. 用户使用要登录的微信扫描二维码；关注事件或已关注用户的扫码事件把其公众号 OpenID 与这次网页尝试绑定。
-3. 用户在公众号发送“登录”，收到验证码后回到原网页输入。
-4. FmlySys 一次性消费浏览器绑定的验证码，并将公众号身份映射到已审核成员；映射成功才创建 `fmly_session`。
+1. 用户访问 `/login/wechat-code`。页面展示配置的公众号静态二维码，或提示已关注用户直接发送“登录”。
+2. 新用户关注后由 `subscribe` 回调直接收到验证码；已有关注用户在公众号对话中发送“登录”领取验证码。
+3. 用户将验证码填入本人发起的登录页。验证码与 OpenID 关联，不锁定某个具体浏览器页，且仅能成功兑换一次。
+4. FmlySys 将该 OpenID/UnionID 映射到已审核成员；映射成功才创建 `fmly_session`。
 
 如果首次登录显示身份未绑定，先通过项目现有微信身份审核/绑定流程建立成员关联。不能仅凭昵称、菜单参数或用户自行提交的 OpenID 自动认定成员身份。
 
@@ -75,7 +76,7 @@ FMLYSYS_WECHAT_OA_TOKEN=自行生成的随机字符串
 
 只有当公众号平台以后允许该账号的菜单或其可访问内容合法地链接到 FmlySys，或者改用具备相应权限的公众号/正式授权第三方平台，才值得重新评估一次性登录票据的设计。届时仍需把票据绑定到回调取得并已匹配成员的 OpenID，做到短时、单次、防重放和失败限流；不能信任静态参数、昵称或“最近一次点击”。
 
-在当前账号限制下，继续使用本指南前述的“微信验证码登录”二维码流程即可：用户从 FmlySys 页面扫码，公众号回调将 OpenID 绑定到该次网页尝试，再由用户在公众号发送“登录”取得验证码。该流程不依赖自定义菜单跳转网址。
+在当前账号限制下，使用公众号后台提供的静态二维码即可，无需生成带参数二维码。新关注自动回复验证码；已关注用户按登录页提示发送“登录”。该方案仍要求公众号消息推送回调能接收 `subscribe` 和文本消息并返回明文 XML；发布前需用真实个人公众号分别验证关注回复与关键词回复。静态二维码不会产生每次打开网页唯一的 scene，因此验证码不能再绑定到特定网页尝试，只能作为短时、单次的 OpenID 登录凭证。
 
 ## 维护与排障
 
@@ -85,11 +86,10 @@ FMLYSYS_WECHAT_OA_TOKEN=自行生成的随机字符串
 
 诊断日志只在当前进程内存中保留最近 100 条，重启后清空。普通登录/探测路径只记录 HTTP 4xx/5xx 和处理 panic；普通 2xx/3xx 不记录。微信 API 交互和网页登录/公众号回调属于专门的诊断类别，无论成功或失败都会记录，包括 200/302。原始详情包含 URL 查询参数、请求与响应 Headers（包括 Cookie/Set-Cookie）、正文、远端地址、状态码、耗时、User-Agent、代理信息和未脱敏错误。URL 可能含 AppSecret、access_token 或授权 code，回调正文可能含 OpenID 和验证码。URL、query、每组 Headers、请求/响应正文和错误文字各最多保留 64 KiB，超限字段会标记截断；日志最多保留 100 条且不写入数据库或磁盘。
 
-- 有 `/login/wechat-code` 的 502 记录：请求到达 Go 服务，502 是应用在生成登录二维码或保存登录状态时返回的。查看同一时间附近的“微信 API”条目，可检查 token/二维码 API 的原始 HTTP 状态、响应错误码和正文；若有单独的“登录错误”条目，也可查看完整 Go 错误。
-- 二维码接口返回 `48001 api unauthorized`：请求已经到达微信，access token 也已被微信解析，但当前公众号没有“生成带参数二维码”接口权限。检查公众号后台“设置与开发/接口权限”中是否列出并已获得该接口；个人未认证公众号若没有该权限，修改 IP 白名单不能解决，需要改用具备该权限的公众号，或先用微信公众平台接口测试账号联调。
+- 旧版 `/cgi-bin/qrcode/create` 记录返回 `48001 api unauthorized`：这是动态二维码接口权限不足；当前静态二维码验证码登录不再调用该接口，因此此错误不应再阻断登录页。若之后的 `user/info` 请求返回权限错误，系统仍会尝试按公众号 OpenID 直接匹配成员；没有直接绑定时无法完成登录，需要先建立 OA OpenID/UnionID 身份关联。
 - token 接口返回 `40164 invalid ip`：这才是典型的 IP 白名单问题。响应正文通常会给出微信实际看到的出口 IP，把该 IP 加入公众号白名单后再试。若 token 已成功返回而二维码接口是 `48001`，当前失败点不是 IP 白名单。
 - 出站请求不会经过站点前面的 Cloudflare CDN；Cloudflare 只处理访问 FmlySys 域名的入站流量。Go 客户端会按服务器环境中的 `HTTPS_PROXY`/`NO_PROXY` 和系统网络路由访问微信。诊断中的 `network.proxy_url` 可判断是否走代理，`local_address`/`remote_address` 可看到本机到直连目标或代理的 socket；经过 NAT 或上游代理后的最终公网出口 IP 无法仅从本机 socket 得出，应以微信 `40164` 返回的 IP 或使用同一代理链路的出口 IP 探测结果为准。
-- 对照 `微信 API` 二维码请求正文中的 scene 与 `微信回调` XML 中的 `EventKey`，可确认公众号是否把当前网页二维码事件送达；`qrscene_` 前缀会由回调处理器去掉。再对照回调中的 `FromUserName`、文本消息和 XML 响应，可检查扫码绑定及验证码回复流程。
+- 关注新用户时，在“微信回调”记录中检查 `Event=subscribe`、`FromUserName` 以及返回 XML 内的验证码；已关注用户则检查文本消息 `登录` 与对应 XML 回复。此流程不再依赖 scene/EventKey。
 - 没有对应的登录请求记录：如果期间没有重启或切换服务实例，通常表示请求未到达当前 Go 进程。检查 Cloudflare/WAF、反向代理 upstream、DNS 和实际部署目标；多实例部署时需查看实际处理请求的实例。应用内的诊断页无法读取 Cloudflare 边缘或未到达源站的代理日志。
 - 手机显示网关错误但列表没有登录请求记录：若开发中心源站探测正常，仍需按 CF-Ray（从 Cloudflare 错误页查看）排查边缘/WAF/路由，确认 `/login/wechat-code` 是否到达源站。源站 ping 的成功 200 不会记录。
 - 源站探测也打不开或显示 `Cannot GET`：当前域名很可能仍指向旧版/另一套服务，或该探测路径没有转发到 FmlySys。
@@ -103,11 +103,11 @@ FMLYSYS_WECHAT_OA_TOKEN=自行生成的随机字符串
 - **测试环境返回 `Cannot GET /login/wechat-code`**：当前 Go 版本在主路由注册了 `GET /login/wechat-code`。即使微信验证码登录配置缺失，该处理器也应返回说明配置缺失的 HTML（HTTP 503），而不是 `Cannot GET`。出现该文本通常表示请求到达了旧版本、另一套 Express/静态服务，或反向代理没有把该路径转给当前 Go 服务；确认目标环境部署了包含该路由的版本，并检查路径路由规则。
 - **微信内打开登录页**：当前版本的微信内置浏览器保护会拦截普通功能页，并显示“请在手机自带浏览器中打开”的提示；这是当前显式保护行为。不要为了菜单跳转而整体关闭保护。
 - **公众号验证回调失败**：确认 URL 是 HTTPS 公网地址且路径为 `/auth/wechat/code/callback`，公众号 Token 与环境变量逐字符一致，选择明文 XML 模式。检查代理是否把 POST 正确转发到该服务。
-- **二维码生成失败**：在管理员原始诊断记录中查看 token 和二维码 API 的完整请求/响应、平台错误码及出站网络错误。原始记录可能包含 AppSecret、access_token，复制或下载后应由管理员自行脱敏并妥善保管；不要把未经脱敏的内容放入公开工单或聊天。
-- **收不到扫码或文本事件**：确认公众号配置的 URL 指向本服务。如果同一个公众号已由其他系统接收消息，需要先统一回调入口并做事件分发。
-- **验证码无效**：确认用户扫的是当前网页上的二维码，并在同一浏览器页输入最新验证码；二维码十分钟、验证码五分钟过期，验证码只允许一次成功兑换，错误五次即失效。
+- **静态二维码不显示**：确认程序包包含 `web/static/shabigongzhonghao.jpg`；若通过 `FMLYSYS_WECHAT_OA_QR_CODE_URL` 覆盖了默认值，检查其 HTTPS 地址或站内绝对路径，并重启服务。
+- **收不到关注回复或“登录”回复**：确认公众号配置的 URL 指向本服务，消息加密方式为明文、格式为 XML，消息推送验证已通过。如果同一个公众号已由其他系统接收消息，需要先统一回调入口并做事件分发；再查看开发中心的“微信回调”原始记录。
+- **验证码无效**：确认验证码未超过五分钟、未被使用，并且没有复制错位；验证码只成功兑换一次。每个浏览器状态最多允许五次错误提交。
 - **找不到成员**：确认公众号身份已经绑定成员；若网站应用与公众号使用不同 OpenID，检查是否能取得匹配的 UnionID，以及二者是否关联到同一微信开放平台账号。
 - **菜单不能设置系统网址**：这是当前公众号后台允许链接范围的限制。固定公众号链接不能把用户导航到 FmlySys，也不会把 OpenID 作为 URL 参数传给网站；请使用二维码验证码登录，或在公众号权限条件改变后再评估菜单方案。
 - **轮换密钥**：同时更新公众号后台 Token 与 `FMLYSYS_WECHAT_OA_TOKEN`，重启服务，再通过后台验证回调。更新 AppSecret 后也需重启，让公众号 API 客户端使用新配置。
 
-当前程序只处理登录所需的扫码/关注事件和“登录”文本，其它有效事件会确认接收但不做业务处理。启用开发者服务器前，应确认现有公众号自动回复、菜单事件或其他集成不会因单一消息回调地址被覆盖。
+当前程序只处理新关注事件和“登录”文本，其它有效事件会确认接收但不做业务处理。启用开发者服务器前，应确认现有公众号自动回复、菜单事件或其他集成不会因单一消息回调地址被覆盖。

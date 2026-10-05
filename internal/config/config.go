@@ -26,6 +26,7 @@ type Config struct {
 	WeChatOAAppID          string
 	WeChatOAAppSecret      string
 	WeChatOAToken          string
+	WeChatOAQRCodeURL      string
 	AdminUsername          string
 	AdminBootstrapPassword string
 	MasterKey              string
@@ -81,6 +82,7 @@ func Load() (Config, error) {
 		WeChatOAAppID:          strings.TrimSpace(value("FMLYSYS_WECHAT_OA_APP_ID", "")),
 		WeChatOAAppSecret:      strings.TrimSpace(value("FMLYSYS_WECHAT_OA_APP_SECRET", "")),
 		WeChatOAToken:          strings.TrimSpace(value("FMLYSYS_WECHAT_OA_TOKEN", "")),
+		WeChatOAQRCodeURL:      nonEmpty("FMLYSYS_WECHAT_OA_QR_CODE_URL", "/static/shabigongzhonghao.jpg"),
 		AdminUsername:          nonEmpty("FMLYSYS_ADMIN_USERNAME", "admin"),
 		AdminBootstrapPassword: value("FMLYSYS_ADMIN_BOOTSTRAP_PASSWORD", ""),
 		MasterKey:              value("FMLYSYS_MASTER_KEY", ""),

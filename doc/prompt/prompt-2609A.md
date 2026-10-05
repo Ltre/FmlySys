@@ -779,6 +779,65 @@
     Add raw JSON inspection, copy, and download controls with bounded in-memory retention, and document the WeChat request and callback flow for setup and troubleshooting.
     ```
 
+
+
+问：
+
+
+    你确定【如果必须继续使用当前个人公众号，实际可行的方向是改成“静态公众号二维码 + 用户发送‘登录’领取一次性验证码”，彻底取消 /cgi-bin/qrcode/create 调用。验证码直接绑定回调里的 OpenID，用户再把验证码填回网页  】是否完全可行？
+    如果可行，我觉得有必要适时提醒用户发送什么消息来获取code，例如刚关注公众号，就推送code，如果已经关注了，那就应该在网站扫码UI附近合适的位置提醒用户可以发送什么消息来获取登录验证码
+
+
+
+答：
+
+
+
+    原理上可行，但要补一个安全边界：静态关注二维码不会给网页提供每次扫码独有的 scene，所以不能继续把验证码绑定到某个网页 state。应把验证码绑定到公众号 OpenID，做短时、单次、限次；用户提交后再按 OpenID 映射已审核成员。这样可完成登录，但验证码本身就是短时登录凭证，任何拿到它的人都能先兑换。另一个实际前提是需要公众号的静态二维码图片或公众号名称，目前仓库里没有这份素材。
+    我先检查现有验证码表和 callback 逻辑，确认怎么复用。随后会完成无动态二维码的登录引导及“新关注 / 已关注”的消息提示；静态二维码会留成可配置入口，不会伪造一个二维码。
+
+    运行了命令已搜索网页
+
+    上下文已自动压缩
+
+    运行了命令
+
+    我会把“完全可行”说准确：静态二维码本身不需要二维码生成接口，但是否能收到关注/文本回调，仍取决于公众号能否启用服务器消息推送并成功验证。即使回调可用，静态二维码也无法把一次扫码和某个浏览器标签绑定；我在核对微信的回调机制和当前登录实现，再决定怎样调整提示及验证码边界，避免给你一个看似能用、实际串号的方案。
+
+    编辑了文件运行了命令已搜索网页
+
+    确认了实现边界：新关注和已关注用户都可以通过公众号回调拿到验证码；但静态二维码不含网页专属标识，验证码只能绑定 OpenID，不能再承诺“只在刚才那个浏览器页有效”。我已经按这个边界移除了登录页的动态二维码请求，加入关注自动回复、已关注用户发送“登录”的说明，并把静态二维码图片做成可选配置。接下来我在核对数据库迁移、旧流程兼容和文档措辞。
+
+    编辑了文件运行了命令
+
+    这个方案**技术上可行，但还不能保证在你的个人公众号上无条件完整可用**。新关注时，系统可以在收到 `subscribe` 回调后，直接在回调响应里回复验证码；已关注用户可以发送“登录”领取。它不需要 `/cgi-bin/qrcode/create`，所以你遇到的 `48001` 不会再卡住登录页。
+
+    有两个条件仍需用实际公众号验证：公众号服务器回调能否收到关注和文本消息并成功回复；系统能否把回调里的 OpenID 匹配到已绑定成员。若登录时获取不到可用的 UnionID，且该公众号 OpenID 尚未绑定成员，系统仍会拒绝登录。
+
+    我已按这个方案调整代码：登录页不再请求动态二维码；新关注会收到验证码，已关注用户的登录页和首页入口会提示发送“登录”；静态公众号二维码可通过 `FMLYSYS_WECHAT_OA_QR_CODE_URL` 配置。验证码有效 5 分钟、只能兑换一次，并绑定公众号 OpenID。**它不绑定具体浏览器页**，拿到验证码的人可能先兑换，所以页面和回复都会提醒不要转发。
+
+    实现和接入说明已记入[开发日志](D:/Workspace/github/Ltre/FmlySys/doc/devlog/devlog-2609-features.md)和[微信验证码登录指南](D:/Workspace/github/Ltre/FmlySys/doc/wechat-code-login.md)。改动位于 `dev-2609A-step2-fake-wechat-qrlogin`，未暂存、未提交；`go.mod` 和 `go.sum` 保留了本轮开始前已有的修改。已运行 `gofmt` 和 `git diff --check`，未运行测试。配置静态二维码后，还需要用真实公众号分别验证“新关注收到验证码”和“已关注发送登录收到验证码”，再确认成员身份匹配。
+
+    已编辑 13 个文件+348-80查看变更撤销查看变更
+
+    internal/config/config.gointernal/config/config.go+2-0
+    internal/httpserver/server.gointernal/httpserver/server.go+3-1
+    internal/store/wechat_code_login.gointernal/store/wechat_code_login.go+119-0
+    migrations/partition/000012_wechat_openid_login_codes.sqlmigrations/partition/000012_wechat_openid_login_codes.sql+24-0
+    internal/httpserver/wechat_code_login.gointernal/httpserver/wechat_code_login.go+123-56
+    web/templates/wechat-code-login.htmlweb/templates/wechat-code-login.html+40-1
+    web/static/wechat-code-login.cssweb/static/wechat-code-login.css+3-0
+    web/templates/login.htmlweb/templates/login.html+1-1
+    README.mdREADME.md+4-2
+    scripts/linux-alyhk.start.shscripts/linux-alyhk.start.sh+1-0
+    scripts/win-dev.start.cmdscripts/win-dev.start.cmd+1-0
+    doc/wechat-code-login.mddoc/wechat-code-login.md+19-19
+    doc/devlog/devlog-2609-features.mddoc/devlog/devlog-2609-features.md+8-0
+
+
+
+
+
 ---------------------------
 
 问：

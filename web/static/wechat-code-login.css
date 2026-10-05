@@ -3,6 +3,9 @@
 .wechat-login-qr{display:grid;place-items:center;margin:22px auto 16px}
 .wechat-login-qr img{display:block;width:min(248px,68vw);height:auto;aspect-ratio:1;object-fit:contain;border:1px solid #e5e7eb;border-radius:12px;background:#fff;padding:8px}
 .wechat-login-help{max-width:360px;margin:0 auto 18px;color:#697386;line-height:1.75}
+.wechat-login-help p{margin:8px 0}
+.wechat-code-qr-missing{text-align:left;margin:18px 0}
+.wechat-code-qr-missing p{margin:8px 0 0;line-height:1.65}
 .wechat-code-form{text-align:left}
 .wechat-code-form input{text-align:center;letter-spacing:.22em;font-size:18px}
 .wechat-back-link{margin-top:12px}

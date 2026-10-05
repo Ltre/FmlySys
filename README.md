@@ -109,6 +109,7 @@ FMLYSYS_WECHAT_APP_SECRET=你的AppSecret
 FMLYSYS_WECHAT_OA_APP_ID=公众号AppID
 FMLYSYS_WECHAT_OA_APP_SECRET=公众号AppSecret
 FMLYSYS_WECHAT_OA_TOKEN=自行生成的32位回调Token
+FMLYSYS_WECHAT_OA_QR_CODE_URL=/static/shabigongzhonghao.jpg
 FMLYSYS_MASTER_KEY=
 ```
 
@@ -221,9 +222,9 @@ FMLYSYS_WECHAT_OA_APP_SECRET
 FMLYSYS_WECHAT_OA_TOKEN
 ```
 
-其中 `FMLYSYS_WECHAT_OA_TOKEN` 需要是 16–32 个字符。将公众号开发者服务器 URL 设置为当前站点的 `/auth/wechat/code/callback`，并使用明文消息模式；服务器必须能从公网通过 HTTPS 访问。网页登录时系统会向公众号 API 申请一个绑定本次浏览器尝试的 10 分钟临时场景二维码。用户扫码后在公众号发送“登录”，公众号回复 8 位验证码；验证码 5 分钟有效、仅对应当前浏览器、限一次使用，并且错误输入 5 次后失效。
+其中 `FMLYSYS_WECHAT_OA_TOKEN` 需要是 16–32 个字符。将公众号开发者服务器 URL 设置为当前站点的 `/auth/wechat/code/callback`，并使用明文消息模式；服务器必须能从公网通过 HTTPS 访问。`FMLYSYS_WECHAT_OA_QR_CODE_URL` 默认值为 `/static/shabigongzhonghao.jpg`，对应仓库内的公众号静态二维码；如需替换，可填写 HTTPS 图片 URL 或站内绝对路径。登录页不调用 `/cgi-bin/qrcode/create`：新关注用户会在 `subscribe` 回调中收到一次性验证码；已关注用户可以在公众号对话中发送“登录”领取 8 位验证码。验证码绑定公众号 OpenID，5 分钟有效且只能使用一次；它不绑定特定浏览器页，任何拿到验证码的人都可能先兑换，因此不可转发。错误提交最多 5 次/登录状态，另有每 IP 5 分钟 20 次的进程内限流。
 
-启用开发者服务器后，公众号消息会交给此回调处理；当前只响应登录二维码事件和“登录”文本，其它消息会被确认但不自动回复。若公众号还承担其他消息业务，需要在此回调中合并处理。
+启用开发者服务器后，公众号消息会交给此回调处理；当前在新关注时回复验证码，在已关注用户发送“登录”时回复验证码，其它消息会被确认但不自动回复。若公众号还承担其他消息业务，需要在此回调中合并处理。
 
 新登录方式只接受已有且已绑定有效家族成员的微信身份，不会创建或审批成员。网站 OAuth 使用网站应用 OpenID，公众号回调使用公众号 OpenID；要跨应用识别为同一个人，网站应用和公众号需绑定在同一个微信开放平台账号下，使公众号用户信息接口返回的 UnionID 可匹配到已审核身份。若没有 UnionID，则只在 OpenID 完全相同的情况下允许匹配。
 
@@ -252,6 +253,7 @@ FMLYSYS_WECHAT_APP_SECRET=
 FMLYSYS_WECHAT_OA_APP_ID=
 FMLYSYS_WECHAT_OA_APP_SECRET=
 FMLYSYS_WECHAT_OA_TOKEN=
+FMLYSYS_WECHAT_OA_QR_CODE_URL=/static/shabigongzhonghao.jpg
 ```
 
 旧的 `FMLYSYS_ADDR` 不再使用。

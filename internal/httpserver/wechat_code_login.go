@@ -14,6 +14,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,11 +26,19 @@ import (
 const (
 	wechatCodeStateCookiePrefix = "fmly_wechat_code_state_"
 	wechatCodeStatePath         = "/auth/wechat/code/login"
-	wechatCodeSceneTTL          = 10 * time.Minute
+	wechatCodeSceneTTL          = 10 * time.Minute // retained for legacy attempt cleanup
+	wechatCodeStateTTL          = 20 * time.Minute
 	wechatCodeTTL               = 5 * time.Minute
 	wechatCodeCooldown          = 30 * time.Second
 	wechatCodeDigits            = 8
+	wechatLoginRateWindow       = 5 * time.Minute
+	wechatLoginRateMax          = 20
 )
+
+type wechatLoginRateBucket struct {
+	windowStarted time.Time
+	attempts      int
+}
 
 type wechatCodeMessage struct {
 	ToUserName   string `xml:"ToUserName"`
@@ -73,26 +82,14 @@ func (s *Server) wechatCodeLoginPage(w http.ResponseWriter, r *http.Request) {
 		s.wechatCodeLoginUnavailable(w, v)
 		return
 	}
-	scene, err := randomToken()
-	if err != nil {
-		s.recordWechatCodeLoginProblem(r, err, "生成二维码场景值失败；请检查服务器随机数源。")
+	expires := time.Now().UTC().Add(wechatCodeStateTTL)
+	if err := s.Store.CreateWeChatCodeLoginBrowserState(r.Context(), wechatTokenHash(state), expires); err != nil {
+		s.recordWechatCodeLoginProblem(r, err, "保存验证码登录状态失败；请检查数据库状态和磁盘空间。")
 		s.wechatCodeLoginUnavailable(w, v)
 		return
 	}
-	qrURL, err := s.wechatOA.TemporaryQRCode(r.Context(), scene, int(wechatCodeSceneTTL.Seconds()))
-	if err != nil {
-		s.recordWechatCodeLoginProblem(r, err, "公众号二维码接口失败；请核对公众号配置和接口权限。")
-		s.wechatCodeLoginUnavailable(w, v)
-		return
-	}
-	expires := time.Now().UTC().Add(wechatCodeSceneTTL)
-	if err := s.Store.CreateWeChatCodeLoginAttempt(r.Context(), wechatTokenHash(state), wechatTokenHash(scene), expires); err != nil {
-		s.recordWechatCodeLoginProblem(r, err, "保存二维码登录状态失败；请检查数据库状态和磁盘空间。")
-		s.wechatCodeLoginUnavailable(w, v)
-		return
-	}
-	setCookie(w, r, wechatCodeStateCookieName(state), state, wechatCodeStatePath, int(wechatCodeSceneTTL.Seconds()))
-	v.WeChatQRCodeURL = qrURL
+	setCookie(w, r, wechatCodeStateCookieName(state), state, wechatCodeStatePath, int(wechatCodeStateTTL.Seconds()))
+	v.WeChatQRCodeURL = configuredWeChatQRCodeURL(s.Config.WeChatOAQRCodeURL)
 	v.WeChatLoginState = state
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
@@ -100,7 +97,7 @@ func (s *Server) wechatCodeLoginPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) wechatCodeLoginUnavailable(w http.ResponseWriter, v view) {
-	v.Error = "暂时无法生成微信登录二维码，请稍后刷新重试。"
+	v.Error = "暂时无法打开微信验证码登录，请稍后刷新重试。"
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusBadGateway)
 	s.render(w, "wechat-code-login.html", v)
@@ -109,19 +106,25 @@ func (s *Server) wechatCodeLoginUnavailable(w http.ResponseWriter, v view) {
 func wechatCodeLoginError(key string) string {
 	switch key {
 	case "invalid":
-		return "验证码错误、已过期或已使用，请扫描新二维码后重新获取。"
+		return "验证码错误、已过期或已使用。请在公众号发送“登录”获取新验证码。"
+	case "rate":
+		return "提交过于频繁，请稍后再试。"
 	case "unbound":
 		return "该微信尚未绑定已审核的家族成员。请先使用“微信扫码登录”提交加入申请，并等待管理员审核。"
 	case "service":
-		return "微信身份校验暂时失败，请扫描新二维码后重试。"
+		return "微信身份校验暂时失败，请稍后重新提交验证码。"
 	default:
-		return "登录失败，请刷新二维码后重试。"
+		return "登录失败，请刷新页面后重新获取验证码。"
 	}
 }
 
 func (s *Server) wechatCodeLogin(w http.ResponseWriter, r *http.Request) {
 	if !s.Config.WeChatCodeLoginConfigured() || s.wechatOA == nil {
 		http.Error(w, "微信验证码登录尚未配置", http.StatusServiceUnavailable)
+		return
+	}
+	if !s.allowWeChatCodeLoginAttempt(requestIPAddress(r), time.Now()) {
+		redirect(w, r, "/login/wechat-code?error=rate")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
@@ -142,13 +145,19 @@ func (s *Server) wechatCodeLogin(w http.ResponseWriter, r *http.Request) {
 	clearStateCookie := func() { clearCookie(w, r, cookieName, wechatCodeStatePath) }
 	code := strings.TrimSpace(r.FormValue("code"))
 	if len(code) != wechatCodeDigits || !allASCIIDigits(code) {
-		clearStateCookie()
+		_, _ = s.Store.ConsumeOpenIDWeChatLoginCode(r.Context(), wechatTokenHash(state), wechatLoginCodeHash(code, s.Config.WeChatOAToken), time.Now())
 		redirect(w, r, "/login/wechat-code?error=invalid")
 		return
 	}
-	openID, err := s.Store.ConsumeWeChatCodeLoginCode(r.Context(), wechatTokenHash(state), wechatLoginCodeHash(code, s.Config.WeChatOAToken), time.Now())
+	stateHash := wechatTokenHash(state)
+	codeHash := wechatLoginCodeHash(code, s.Config.WeChatOAToken)
+	openID, err := s.Store.ConsumeOpenIDWeChatLoginCode(r.Context(), stateHash, codeHash, time.Now())
+	if isMissingOpenIDCodeTable(err) {
+		// An in-flight login created before the static-code migration can still
+		// finish while its legacy scene attempt remains valid.
+		openID, err = s.Store.ConsumeWeChatCodeLoginCode(r.Context(), stateHash, codeHash, time.Now())
+	}
 	if err != nil {
-		clearStateCookie()
 		redirect(w, r, "/login/wechat-code?error=invalid")
 		return
 	}
@@ -215,45 +224,103 @@ func (s *Server) wechatCodeCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	switch message.MsgType {
 	case "event":
-		if message.Event == "subscribe" || message.Event == "SCAN" {
-			scene := message.EventKey
-			if strings.HasPrefix(scene, "qrscene_") {
-				scene = strings.TrimPrefix(scene, "qrscene_")
-			}
-			claimed, err := s.Store.MarkWeChatCodeLoginScanned(r.Context(), wechatTokenHash(scene), message.FromUserName, time.Now())
-			if err != nil {
-				writeWeChatTextReply(w, message, "系统暂时繁忙，请稍后重新扫描二维码。")
-				return
-			}
-			if claimed {
-				writeWeChatTextReply(w, message, "扫码成功。请在公众号中输入“登录”获取验证码，再填入刚才打开的网页登录页。")
-				return
-			}
-			writeWeChatTextReply(w, message, "二维码已过期或已经由其他微信使用，请刷新网页登录页后再扫描。")
+		if message.Event == "subscribe" {
+			s.issueWeChatLoginCodeReply(w, r, message, true)
+			return
+		}
+		if message.Event == "SCAN" {
+			s.issueWeChatLoginCodeReply(w, r, message, false)
 			return
 		}
 	case "text":
 		if strings.TrimSpace(message.Content) == "登录" {
-			code, err := generateWeChatLoginCode()
-			if err != nil {
-				writeWeChatTextReply(w, message, "验证码生成失败，请稍后重试。")
-				return
-			}
-			err = s.Store.IssueWeChatCodeLoginCode(r.Context(), message.FromUserName, wechatLoginCodeHash(code, s.Config.WeChatOAToken), time.Now(), time.Now().Add(wechatCodeTTL), wechatCodeCooldown)
-			switch {
-			case err == nil:
-				writeWeChatTextReply(w, message, fmt.Sprintf("你的微信登录验证码是：%s。验证码 5 分钟内有效，且仅能用于刚才扫码的网页。", code))
-			case errors.Is(err, store.ErrWeChatLoginCodeRateLimit):
-				writeWeChatTextReply(w, message, "已在短时间内发送过验证码，请使用最近收到的验证码，或稍后再获取。")
-			case errors.Is(err, store.ErrInvalidWeChatLoginAttempt):
-				writeWeChatTextReply(w, message, "未找到有效的网页登录请求。请先打开网页登录页并扫描页面上的新二维码，再输入“登录”。")
-			default:
-				writeWeChatTextReply(w, message, "系统暂时繁忙，请稍后再试。")
-			}
+			s.issueWeChatLoginCodeReply(w, r, message, false)
 			return
 		}
 	}
 	_, _ = io.WriteString(w, "success")
+}
+
+func (s *Server) issueWeChatLoginCodeReply(w http.ResponseWriter, r *http.Request, message wechatCodeMessage, welcome bool) {
+	var code string
+	var err error
+	for attempt := 0; attempt < 5; attempt++ {
+		code, err = generateWeChatLoginCode()
+		if err != nil {
+			break
+		}
+		err = s.Store.IssueOpenIDWeChatLoginCode(r.Context(), message.FromUserName, wechatLoginCodeHash(code, s.Config.WeChatOAToken), time.Now(), time.Now().Add(wechatCodeTTL), wechatCodeCooldown)
+		if isMissingOpenIDCodeTable(err) {
+			err = s.Store.IssueWeChatCodeLoginCode(r.Context(), message.FromUserName, wechatLoginCodeHash(code, s.Config.WeChatOAToken), time.Now(), time.Now().Add(wechatCodeTTL), wechatCodeCooldown)
+		}
+		if !errors.Is(err, store.ErrWeChatLoginCodeCollision) {
+			break
+		}
+	}
+	switch {
+	case err == nil:
+		intro := ""
+		if welcome {
+			intro = "欢迎关注 FmlySys。"
+		}
+		writeWeChatTextReply(w, message, fmt.Sprintf("%s微信登录验证码：%s。5 分钟内有效且只能使用一次。请只在本人发起的 FmlySys 登录页输入，不要转发。", intro, code))
+	case errors.Is(err, store.ErrWeChatLoginCodeRateLimit):
+		writeWeChatTextReply(w, message, "最近刚发送过登录验证码，请使用最近收到的验证码；如果没有收到，请稍后回复“登录”重新获取。")
+	default:
+		writeWeChatTextReply(w, message, "暂时无法生成登录验证码，请稍后回复“登录”重试。")
+	}
+}
+
+func isMissingOpenIDCodeTable(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "no such table: wechat_openid_login_codes") || strings.Contains(message, "no such table: wechat_code_login_browser_states")
+}
+
+func (s *Server) allowWeChatCodeLoginAttempt(ip string, now time.Time) bool {
+	if ip == "" {
+		ip = "unknown"
+	}
+	s.wechatLoginRateMu.Lock()
+	defer s.wechatLoginRateMu.Unlock()
+	if s.wechatLoginRate == nil {
+		s.wechatLoginRate = make(map[string]wechatLoginRateBucket)
+	}
+	if len(s.wechatLoginRate) > 4096 {
+		for key, bucket := range s.wechatLoginRate {
+			if now.Sub(bucket.windowStarted) >= wechatLoginRateWindow {
+				delete(s.wechatLoginRate, key)
+			}
+		}
+	}
+	if _, exists := s.wechatLoginRate[ip]; !exists && len(s.wechatLoginRate) >= 4096 {
+		return false
+	}
+	bucket := s.wechatLoginRate[ip]
+	if bucket.windowStarted.IsZero() || now.Sub(bucket.windowStarted) >= wechatLoginRateWindow || now.Before(bucket.windowStarted) {
+		bucket = wechatLoginRateBucket{windowStarted: now}
+	}
+	if bucket.attempts >= wechatLoginRateMax {
+		s.wechatLoginRate[ip] = bucket
+		return false
+	}
+	bucket.attempts++
+	s.wechatLoginRate[ip] = bucket
+	return true
+}
+
+func configuredWeChatQRCodeURL(raw string) string {
+	value := strings.TrimSpace(raw)
+	if strings.HasPrefix(value, "/") && !strings.HasPrefix(value, "//") {
+		return value
+	}
+	u, err := url.Parse(value)
+	if err != nil || u.Host == "" || u.Scheme != "https" {
+		return ""
+	}
+	return value
 }
 
 func writeWeChatTextReply(w http.ResponseWriter, request wechatCodeMessage, content string) {

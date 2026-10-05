@@ -1,1 +1,40 @@
-{{define "wechat-code-login.html"}}<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>{{.Title}}</title><link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/mobile.css"><link rel="stylesheet" href="/static/wechat-code-login.css"></head><body><main class="auth-wrap"><section class="card auth-card wechat-code-card"><h1>微信验证码登录</h1><p class="muted">使用公众号验证码，登录已绑定的 FmlySys 成员身份。</p>{{if .Error}}<div class="notice danger" role="alert">{{.Error}}</div>{{end}}{{if .WeChatQRCodeURL}}<div class="wechat-login-qr"><img src="{{.WeChatQRCodeURL}}" alt="微信验证码登录二维码"></div><p class="wechat-login-help">请使用微信扫描上方二维码关注公众号；如果已经关注，请直接扫码。扫描后，在公众号中输入“登录”获取验证码。</p><form method="post" action="/auth/wechat/code/login" class="form wechat-code-form" autocomplete="off"><input type="hidden" name="state" value="{{.WeChatLoginState}}"><label class="wide"><strong>验证码</strong><input name="code" type="text" inputmode="numeric" pattern="[0-9]{8}" minlength="8" maxlength="8" autocomplete="one-time-code" placeholder="请输入 8 位验证码" required></label><button class="wide auth-primary" type="submit">登录</button></form><p class="muted small-text">验证码有效期 5 分钟，仅用于当前浏览器打开的这次登录。</p>{{else if .WeChatCodeLoginReady}}<p class="muted">二维码暂不可用，请稍后刷新此页面。</p>{{end}}<a class="button-like wechat-back-link" href="/login">返回其他登录方式</a></section></main></body></html>{{end}}
+{{define "wechat-code-login.html"}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/mobile.css">
+  <link rel="stylesheet" href="/static/wechat-code-login.css">
+</head>
+<body>
+  <main class="auth-wrap">
+    <section class="card auth-card wechat-code-card">
+      <h1>微信验证码登录</h1>
+      <p class="muted">使用公众号验证码，登录已绑定的 FmlySys 成员身份。</p>
+      {{if .Error}}<div class="notice danger" role="alert">{{.Error}}</div>{{end}}
+      {{if .WeChatQRCodeURL}}
+      <div class="wechat-login-qr"><img src="{{.WeChatQRCodeURL}}" alt="FmlySys 微信公众号二维码"></div>
+      {{else}}
+      <div class="notice wechat-code-qr-missing"><strong>公众号二维码尚未配置</strong><p>若你已经关注公众号，可直接在公众号对话中发送“登录”获取验证码。首次使用的成员请先关注该公众号；如果不确定账号名称，请联系管理员补充静态二维码。</p></div>
+      {{end}}
+      <div class="wechat-login-help">
+        <p><strong>刚关注公众号？</strong>关注后会收到一条登录验证码。</p>
+        <p><strong>已经关注？</strong>在公众号对话中发送“登录”，公众号会回复验证码。</p>
+        <p>将验证码填入下方。验证码 5 分钟有效、只能使用一次，请勿转发。</p>
+      </div>
+      <form method="post" action="/auth/wechat/code/login" class="form wechat-code-form" autocomplete="off">
+        <input type="hidden" name="state" value="{{.WeChatLoginState}}">
+        <label class="wide"><strong>验证码</strong><input name="code" type="text" inputmode="numeric" pattern="[0-9]{8}" minlength="8" maxlength="8" autocomplete="one-time-code" placeholder="请输入 8 位验证码" required></label>
+        <button class="wide auth-primary" type="submit">登录</button>
+      </form>
+      <p class="muted small-text">验证码与发送消息的公众号 OpenID 关联。请只在本人发起的登录页输入，成功登录后仍需匹配已绑定且有效的成员身份。</p>
+      <a class="button-like wechat-back-link" href="/login">返回其他登录方式</a>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}

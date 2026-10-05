@@ -37,16 +37,18 @@ const (
 )
 
 type Server struct {
-	PM           *partition.Manager
-	Store        *store.Store
-	Admin        *adminauth.Service
-	Config       config.Config
-	DevActorID   int64
-	Templates    *template.Template
-	wechatOA     *wechat.OfficialAccountClient
-	mux          *http.ServeMux
-	diagnosticMu sync.RWMutex
-	diagnostics  []requestDiagnosticEntry
+	PM                *partition.Manager
+	Store             *store.Store
+	Admin             *adminauth.Service
+	Config            config.Config
+	DevActorID        int64
+	Templates         *template.Template
+	wechatOA          *wechat.OfficialAccountClient
+	mux               *http.ServeMux
+	diagnosticMu      sync.RWMutex
+	diagnostics       []requestDiagnosticEntry
+	wechatLoginRateMu sync.Mutex
+	wechatLoginRate   map[string]wechatLoginRateBucket
 }
 
 type view struct {
@@ -118,7 +120,7 @@ func New(pm *partition.Manager, st *store.Store, admin *adminauth.Service, cfg c
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{PM: pm, Store: st, Admin: admin, Config: cfg, DevActorID: devActorID, Templates: t, mux: http.NewServeMux()}
+	s := &Server{PM: pm, Store: st, Admin: admin, Config: cfg, DevActorID: devActorID, Templates: t, mux: http.NewServeMux(), wechatLoginRate: make(map[string]wechatLoginRateBucket)}
 	if cfg.WeChatCodeLoginConfigured() {
 		s.wechatOA = wechat.NewOfficialAccount(cfg.WeChatOAAppID, cfg.WeChatOAAppSecret)
 		s.wechatOA.Observer = s.recordWechatExchange

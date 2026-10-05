@@ -12,7 +12,126 @@ import (
 var (
 	ErrInvalidWeChatLoginAttempt = errors.New("微信验证码无效或已过期")
 	ErrWeChatLoginCodeRateLimit  = errors.New("验证码请求过于频繁")
+	ErrWeChatLoginCodeCollision  = errors.New("验证码冲突")
 )
+
+func (s *Store) CreateWeChatCodeLoginBrowserState(ctx context.Context, stateHash string, expiresAt time.Time) error {
+	if stateHash == "" {
+		return ErrInvalidWeChatLoginAttempt
+	}
+	createdAt := now()
+	if _, err := s.DB.ExecContext(ctx, `DELETE FROM wechat_code_login_browser_states WHERE expires_at<=?`, createdAt); err != nil {
+		return err
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO wechat_code_login_browser_states(state_hash,expires_at,created_at) VALUES(?,?,?)`, stateHash, expiresAt.UTC().Format(time.RFC3339Nano), createdAt)
+	return err
+}
+
+func (s *Store) IssueOpenIDWeChatLoginCode(ctx context.Context, openID, codeHash string, issuedAt, expiresAt time.Time, cooldown time.Duration) error {
+	openID = strings.TrimSpace(openID)
+	if openID == "" || codeHash == "" {
+		return ErrInvalidWeChatLoginAttempt
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	nowTime := issuedAt.UTC()
+	nowValue := nowTime.Format(time.RFC3339Nano)
+	cutoff := nowTime.Add(-24 * time.Hour).Format(time.RFC3339Nano)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM wechat_openid_login_codes WHERE issued_at<?`, cutoff); err != nil {
+		return err
+	}
+	var lastIssued string
+	err = tx.QueryRowContext(ctx, `SELECT issued_at FROM wechat_openid_login_codes WHERE openid=?`, openID).Scan(&lastIssued)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil {
+		if last, parseErr := time.Parse(time.RFC3339Nano, lastIssued); parseErr == nil && nowTime.Sub(last) < cooldown {
+			return ErrWeChatLoginCodeRateLimit
+		}
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO wechat_openid_login_codes(openid,code_hash,expires_at,issued_at,consumed_at)
+VALUES(?,?,?,?, '')
+ON CONFLICT(openid) DO UPDATE SET code_hash=excluded.code_hash,expires_at=excluded.expires_at,issued_at=excluded.issued_at,consumed_at=''`, openID, codeHash, expiresAt.UTC().Format(time.RFC3339Nano), nowValue)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique constraint failed: wechat_openid_login_codes.code_hash") {
+			return ErrWeChatLoginCodeCollision
+		}
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ConsumeOpenIDWeChatLoginCode(ctx context.Context, stateHash, codeHash string, at time.Time) (string, error) {
+	if stateHash == "" || codeHash == "" {
+		return "", ErrInvalidWeChatLoginAttempt
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+
+	nowTime := at.UTC()
+	nowValue := nowTime.Format(time.RFC3339Nano)
+	var stateExpiry string
+	if err := tx.QueryRowContext(ctx, `SELECT expires_at FROM wechat_code_login_browser_states WHERE state_hash=?`, stateHash).Scan(&stateExpiry); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrInvalidWeChatLoginAttempt
+		}
+		return "", err
+	}
+	stateValidUntil, parseErr := time.Parse(time.RFC3339Nano, stateExpiry)
+	if parseErr != nil || !nowTime.Before(stateValidUntil) {
+		return "", ErrInvalidWeChatLoginAttempt
+	}
+
+	var openID, codeExpiry string
+	err = tx.QueryRowContext(ctx, `SELECT openid,expires_at FROM wechat_openid_login_codes WHERE code_hash=? AND consumed_at=''`, codeHash).Scan(&openID, &codeExpiry)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", recordWeChatLoginBrowserFailure(ctx, tx, stateHash)
+		}
+		return "", err
+	}
+	codeValidUntil, parseErr := time.Parse(time.RFC3339Nano, codeExpiry)
+	if parseErr != nil || !nowTime.Before(codeValidUntil) {
+		return "", recordWeChatLoginBrowserFailure(ctx, tx, stateHash)
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE wechat_openid_login_codes SET code_hash='',consumed_at=? WHERE openid=? AND code_hash=? AND consumed_at=''`, nowValue, openID, codeHash)
+	if err != nil {
+		return "", err
+	}
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+		return "", rowsErr
+	} else if n != 1 {
+		return "", ErrInvalidWeChatLoginAttempt
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM wechat_code_login_browser_states WHERE state_hash=?`, stateHash); err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return openID, nil
+}
+
+func recordWeChatLoginBrowserFailure(ctx context.Context, tx *sql.Tx, stateHash string) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE wechat_code_login_browser_states SET failed_attempts=failed_attempts+1 WHERE state_hash=?`, stateHash); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM wechat_code_login_browser_states WHERE state_hash=? AND failed_attempts>=5`, stateHash); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return ErrInvalidWeChatLoginAttempt
+}
 
 func (s *Store) CreateWeChatCodeLoginAttempt(ctx context.Context, stateHash, sceneHash string, expiresAt time.Time) error {
 	createdAt := now()
