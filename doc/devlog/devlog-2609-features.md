@@ -152,3 +152,9 @@ Put the financial timeline first in the assets quick menu and ensure older asset
 修复方案：将 `/auth/wechat/code/callback` 列入微信浏览器保护的精确路径例外，允许 GET 签名验证和 POST XML 消息进入原有处理器；全站超级审计对该外部 webhook 直接放行，避免被其他写操作的审计锁和附加数据库查询拖慢被动回复。原有回调签名验证仍然执行，其他微信内置浏览器功能页继续受保护。新增 GET/POST 带 `MicroMessenger` User-Agent 的回归测试，并以当前静态二维码发码表运行贯穿路由和中间件的签名 GET、关注 POST、“登录”文本 POST 测试，确认都能得到预期的 echostr 或验证码 XML。接入文档写明如何识别遮罩 HTML、手工探测与真实公众号消息。
 
 验证：线上未部署修复前，额外用无签名 XML 探测 POST，`MicroMessenger/8.0` 返回 `403` 微信浏览器保护文案，普通 User-Agent 返回 `403 invalid signature`，证明公网 POST 可转发到 Go 应用，但现有保护会先于签名处理器拦截微信 UA。`go test ./internal/httpserver ./web ./cmd/fmlysys` 通过；同次运行的 `internal/store` 全包仍被原有 `TestNormalizePermissionsAddsViewDependencies` 阻断（测试引用不存在的 `medication.manage` 权限），与本次修改无关。`git diff --check` 通过。部署后需在公众号后台重新验证服务器配置，再测试关注与发送“登录”，确认开发中心出现实际 POST，返回正文为验证码 XML。如果仍没有 POST，应依据公众号后台状态、Cloudflare/WAF 与反向代理日志继续查投递链路，不能把代码侧修复视为真实公众号已验证成功。本次未执行 `git add`，未提交。
+
+### 回调放行修复上线后的复测
+
+日期：2026-10-05。用户反馈部署后关注公众号和发送“登录”仍未收到验证码。再次对 `https://fmly.miku.us/auth/wechat/code/callback` 发起无签名探测：带 `MicroMessenger/8.0` 的 GET 与 POST 均返回 `403 invalid signature`。这说明当前线上实例不再返回浏览器保护 HTML/403 文案，且无签名请求已走到回调处理器；该探测不是微信签名请求，也不证明真实关注/文本 POST 到达。待用户提供开发中心最新真实 POST 原始记录后，按结果区分：无 POST 继续查公众号投递/Cloudflare/代理；403 查线上 Token 和消息加密模式；200 `success` 查 XML 事件、正文是否是 `<Encrypt>`；验证码 XML 则查公众号客户端收件状态。排障文档已补充签名错误及加密 XML 的识别方法。
+
+用户随后确认开发中心没有真实 POST 记录。现阶段可确认应用拦截修复在线上生效，但真实公众号消息仍未到当前观察的进程，无法仅凭本地代码继续判断是公众号投递、Cloudflare/WAF、反向代理、多实例还是日志观察进程不一致。新增 `doc/wechat-code-login-unresolved.md`，明确记录未验收状态、分层诊断步骤、日志结果判断、端到端验收条件，并遵照用户要求标记 `dev-2609A-step2-fake-wechat-qrlogin` 为专用分支：在真实公众号关注与文本回复验收完成前，不合并到主分支、`dev-2609A-step1` 或 `dev-2609A`。

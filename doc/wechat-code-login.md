@@ -105,6 +105,8 @@ FMLYSYS_WECHAT_OA_QR_CODE_URL=/static/shabigongzhonghao.jpg
 - **公众号验证回调失败**：确认 URL 是 HTTPS 公网地址且路径为 `/auth/wechat/code/callback`，公众号 Token 与环境变量逐字符一致，选择明文 XML 模式。检查代理是否把 POST 正确转发到该服务。
 - **回调 GET 返回“请在手机自带浏览器中打开”网页**：这是旧版微信浏览器保护误拦截了公众号服务器的 `MicroMessenger` 请求。更新到包含公众号回调白名单的版本；正常的服务器验证 GET 必须返回 `echostr` 原文，事件/文本 POST 才能由回调处理器解析并回复 XML。修复后在公众号后台重新验证服务器配置，再分别测试关注和发送“登录”。
 - **开发中心只有手工探测 GET，没有关注/文本 POST**：手工探测只证明公网入口可达；检查 `user_agent`、`Cf-Connecting-Ip` 和请求 query，不能把测试请求误判为微信事件。若更新后仍完全没有真实 POST 记录，检查公众号消息推送是否启用、URL 是否为当前服务、Cloudflare/WAF 与反向代理 POST 转发，以及是否查看了实际处理请求的进程。开发中心无法记录被 Cloudflare 拦下、未到达 Go 进程的请求。
+- **公众号 POST 返回 `403 invalid signature`**：回调请求已到达 Go 服务，但查询参数中的签名未通过。明文模式应使用 `signature`；Token 必须与线上进程加载的 `FMLYSYS_WECHAT_OA_TOKEN` 完全一致。若公众号后台选了安全/兼容模式，请改为明文模式；当前处理器不识别 `msg_signature`，也没有解密 `<Encrypt>` 正文。
+- **公众号 POST 返回 `200 success`，却没有验证码**：检查原始 `request_body`。处理器仅对 `Event=subscribe`、`Event=SCAN` 或文本 `Content=登录` 发码；若正文只有 `<Encrypt>`，或是其它事件/文本，当前代码会确认收到并返回 `success`，不会发码。明文模式下的预期回复应是 `application/xml`，正文包含 `<Content>` 和八位验证码；“暂时无法生成登录验证码”则表示消息已到处理器但存储/随机数环节失败。
 - **静态二维码不显示**：确认程序包包含 `web/static/shabigongzhonghao.jpg`；若通过 `FMLYSYS_WECHAT_OA_QR_CODE_URL` 覆盖了默认值，检查其 HTTPS 地址或站内绝对路径，并重启服务。
 - **收不到关注回复或“登录”回复**：确认公众号配置的 URL 指向本服务，消息加密方式为明文、格式为 XML，消息推送验证已通过。如果同一个公众号已由其他系统接收消息，需要先统一回调入口并做事件分发；再查看开发中心的“微信回调”原始记录。
 - **验证码无效**：确认验证码未超过五分钟、未被使用，并且没有复制错位；验证码只成功兑换一次。每个浏览器状态最多允许五次错误提交。
