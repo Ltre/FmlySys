@@ -144,3 +144,11 @@ Put the financial timeline first in the assets quick menu and ensure older asset
 实现已将 `/login/wechat-code` 改为本地渲染，不向微信请求 token 或动态二维码。`FMLYSYS_WECHAT_OA_QR_CODE_URL` 默认显示仓库内的 `/static/shabigongzhonghao.jpg`，也允许替换为 HTTPS 图片 URL 或站内路径。`subscribe` / `SCAN` 回调立即同步回复验证码，已关注用户的“登录”文本回调也发放验证码。数据库新增 `000012_wechat_openid_login_codes.sql`，按 OpenID 保存 HMAC 摘要和时效；成功兑换后原子消费并按 OpenID/UnionID 匹配已审核成员。页面的 state cookie 继续防跨站提交，但不被误称为验证码的浏览器绑定。
 
 同时补齐 Windows/Linux 首次配置模板、README、登录页说明及 `doc/wechat-code-login.md` 接入、回调和排障文档。保留旧的动态场景尝试表和 API 客户端方法供数据库升级及历史代码兼容，但新登录页不再调用它们。当前 turn 按环境约束未运行或新增测试；后续部署仍应实测公众号 `subscribe` 被动回复、已关注用户文本回复和 OpenID/UnionID 成员匹配。未执行 `git add`，未提交。
+
+### 公众号关注与“登录”消息无回复排查
+
+日期：2026-10-05。用户测试新关注、重新关注和发送“登录”，均未收到验证码；公众号后台消息推送 URL 为 `https://fmly.miku.us/auth/wechat/code/callback` 且处于启用状态。开发中心最初未显示真实 `subscribe` 或文本 POST。随后用户提供的两条 GET 诊断是本次对线上接口的手工探测，不是公众号事件：普通 User-Agent 返回 `403 invalid signature`，`MicroMessenger/8.0` 返回 `200` 的“请在手机自带浏览器中打开”HTML。线上路由与静态公众号二维码可达，直接证明微信浏览器保护误拦截了该回调路径；如果公众号服务器也带 `MicroMessenger` User-Agent，则 GET 验证响应会错误，POST 消息会在进入回调处理器之前被拒绝。两条 GET 不能证明公众号事件已经到达，也不能据此排除 Cloudflare/WAF 或公众号平台投递问题。
+
+修复方案：将 `/auth/wechat/code/callback` 列入微信浏览器保护的精确路径例外，允许 GET 签名验证和 POST XML 消息进入原有处理器；全站超级审计对该外部 webhook 直接放行，避免被其他写操作的审计锁和附加数据库查询拖慢被动回复。原有回调签名验证仍然执行，其他微信内置浏览器功能页继续受保护。新增 GET/POST 带 `MicroMessenger` User-Agent 的回归测试，并以当前静态二维码发码表运行贯穿路由和中间件的签名 GET、关注 POST、“登录”文本 POST 测试，确认都能得到预期的 echostr 或验证码 XML。接入文档写明如何识别遮罩 HTML、手工探测与真实公众号消息。
+
+验证：线上未部署修复前，额外用无签名 XML 探测 POST，`MicroMessenger/8.0` 返回 `403` 微信浏览器保护文案，普通 User-Agent 返回 `403 invalid signature`，证明公网 POST 可转发到 Go 应用，但现有保护会先于签名处理器拦截微信 UA。`go test ./internal/httpserver ./web ./cmd/fmlysys` 通过；同次运行的 `internal/store` 全包仍被原有 `TestNormalizePermissionsAddsViewDependencies` 阻断（测试引用不存在的 `medication.manage` 权限），与本次修改无关。`git diff --check` 通过。部署后需在公众号后台重新验证服务器配置，再测试关注与发送“登录”，确认开发中心出现实际 POST，返回正文为验证码 XML。如果仍没有 POST，应依据公众号后台状态、Cloudflare/WAF 与反向代理日志继续查投递链路，不能把代码侧修复视为真实公众号已验证成功。本次未执行 `git add`，未提交。

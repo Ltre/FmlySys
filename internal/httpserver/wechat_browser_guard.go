@@ -11,7 +11,7 @@ func isWeChatBrowser(r *http.Request) bool {
 }
 
 func weChatGuardBypass(path string) bool {
-	return path == "/healthz" || path == "/__diag/ping" || strings.HasPrefix(path, "/static/")
+	return path == "/healthz" || path == "/__diag/ping" || path == "/auth/wechat/code/callback" || strings.HasPrefix(path, "/static/")
 }
 
 // WithWeChatBrowserGuard is a temporary front door guard. It deliberately

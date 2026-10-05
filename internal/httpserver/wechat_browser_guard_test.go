@@ -57,3 +57,22 @@ func TestWeChatBrowserGuardAllowsNormalBrowsersAndStaticAssets(t *testing.T) {
 		}
 	}
 }
+
+func TestWeChatBrowserGuardAllowsOfficialAccountCallback(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		t.Run(method, func(t *testing.T) {
+			called := false
+			handler := WithWeChatBrowserGuard(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			req := httptest.NewRequest(method, "https://family.example.test/auth/wechat/code/callback", nil)
+			req.Header.Set("User-Agent", "MicroMessenger/8.0")
+			res := httptest.NewRecorder()
+			handler.ServeHTTP(res, req)
+			if !called || res.Code != http.StatusNoContent {
+				t.Fatalf("callback blocked: called=%v status=%d body=%q", called, res.Code, res.Body.String())
+			}
+		})
+	}
+}

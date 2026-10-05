@@ -135,6 +135,12 @@ func shouldRecordBusinessAccessV2(r *http.Request) bool {
 // audit_logs fact while the request was executing.
 func (s *Server) WithSuperAuditV2(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The official-account webhook is an external, time-sensitive reply.
+		// It has no member session or business audit fact to capture.
+		if r.URL.Path == "/auth/wechat/code/callback" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		meta := s.auditRequestMeta(r)
 		if meta.MemberID > 0 && shouldRecordBusinessAccessV2(r) {
 			member := store.Member{ID: meta.MemberID, Name: meta.MemberName}

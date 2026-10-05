@@ -55,6 +55,60 @@ func TestWeChatCodeLoginPageRouteIsRegistered(t *testing.T) {
 	}
 }
 
+func TestOfficialAccountCallbacksPassMiddlewareAndReplyWithCode(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`CREATE TABLE wechat_openid_login_codes (
+openid TEXT PRIMARY KEY, code_hash TEXT NOT NULL DEFAULT '', expires_at TEXT NOT NULL DEFAULT '',
+issued_at TEXT NOT NULL, consumed_at TEXT NOT NULL DEFAULT '');
+CREATE UNIQUE INDEX idx_wechat_openid_login_active_code ON wechat_openid_login_codes(code_hash)
+WHERE code_hash <> '' AND consumed_at = '';`); err != nil {
+		t.Fatal(err)
+	}
+	token := "callback-token-for-tests"
+	s := &Server{Store: store.New(db), Config: config.Config{WeChatOAAppID: "oa-app", WeChatOAAppSecret: "oa-secret", WeChatOAToken: token}, mux: http.NewServeMux()}
+	s.routes()
+	handler := s.WithSuperAuditV2(WithWeChatBrowserGuard(s.mux))
+	values := url.Values{}
+	values.Set("timestamp", fmt.Sprintf("%d", time.Now().Unix()))
+	values.Set("nonce", "request-nonce")
+	values.Set("signature", weChatTestSignature(token, values.Get("timestamp"), values.Get("nonce")))
+	values.Set("echostr", "verified-by-wechat")
+	callbackURL := "/auth/wechat/code/callback?" + values.Encode()
+	verify := httptest.NewRequest(http.MethodGet, callbackURL, nil)
+	verify.Header.Set("User-Agent", "MicroMessenger/8.0")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, verify)
+	if response.Code != http.StatusOK || response.Body.String() != "verified-by-wechat" {
+		t.Fatalf("verification status=%d body=%q", response.Code, response.Body.String())
+	}
+
+	for _, tc := range []struct {
+		name, openID, message string
+	}{
+		{"subscribe", "subscriber-openid", `<xml><ToUserName>gh-account</ToUserName><FromUserName>subscriber-openid</FromUserName><MsgType>event</MsgType><Event>subscribe</Event></xml>`},
+		{"login text", "returning-openid", `<xml><ToUserName>gh-account</ToUserName><FromUserName>returning-openid</FromUserName><MsgType>text</MsgType><Content>登录</Content></xml>`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, callbackURL, strings.NewReader(tc.message))
+			request.Header.Set("User-Agent", "MicroMessenger/8.0")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			var reply wechatCodeReply
+			if err := xml.Unmarshal(response.Body.Bytes(), &reply); err != nil {
+				t.Fatalf("status=%d body=%q: %v", response.Code, response.Body.String(), err)
+			}
+			if response.Code != http.StatusOK || reply.ToUserName != tc.openID || reply.FromUserName != "gh-account" || reply.MsgType != "text" || !strings.Contains(reply.Content, "微信登录验证码：") {
+				t.Fatalf("unexpected callback reply: status=%d reply=%+v", response.Code, reply)
+			}
+		})
+	}
+}
+
 func TestWeChatLoginCodeIsEightDigitsAndKeyed(t *testing.T) {
 	code, err := generateWeChatLoginCode()
 	if err != nil {
