@@ -64,8 +64,10 @@ func (s *Server) passkeyIdentityLoginFinishV2(w http.ResponseWriter, r *http.Req
 	// unbound credential login and ensures credential B can enter a different
 	// member from credential A even though both belong to one login identity.
 	s.Store.DeletePasskeyLoginIdentitySession(r.Context(), cookieValue(r, passkeyIdentityCookie))
+	s.Store.DeleteTOTPLoginIdentitySession(r.Context(), cookieValue(r, totpIdentityCookie))
 	s.Store.DeleteMemberSession(r.Context(), cookieValue(r, "fmly_session"))
 	clearCookie(w, r, passkeyIdentityCookie, "/")
+	clearCookie(w, r, totpIdentityCookie, "/")
 	clearCookie(w, r, "fmly_session", "/")
 
 	rawIdentity, err := s.Store.CreatePasskeyLoginIdentitySessionForMember(r.Context(), user.IdentityID, memberID)

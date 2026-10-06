@@ -244,21 +244,22 @@ func (s *Server) totpLogin(w http.ResponseWriter, r *http.Request) {
 		s.renderTOTPLoginError(w, r, "用户名或 2FA 动态验证码无效，或验证码已使用。", rawUsername)
 		return
 	}
-	if identity.MemberID == 0 {
-		s.renderTOTPLoginError(w, r, "2FA 身份已验证，但管理员尚未将它关联到家庭成员。关联完成后即可登录。", rawUsername)
-		return
-	}
-	if identity.MemberName == "" {
-		s.renderTOTPLoginError(w, r, "此 2FA 身份关联的家庭成员已停用，请联系管理员。", rawUsername)
-		return
-	}
-	rawSession, err := s.Store.CreateTOTPLoginMemberSession(r.Context(), identity.ID, identity.MemberID, step)
+	// Successful TOTP authentication creates an identity session even when the
+	// administrator has not yet associated that identity with a family member.
+	// The member session is established later, after the association is checked.
+	s.Store.DeleteMemberSession(r.Context(), cookieValue(r, "fmly_session"))
+	s.Store.DeletePasskeyLoginIdentitySession(r.Context(), cookieValue(r, passkeyIdentityCookie))
+	s.Store.DeleteTOTPLoginIdentitySession(r.Context(), cookieValue(r, totpIdentityCookie))
+	clearCookie(w, r, "fmly_session", "/")
+	clearCookie(w, r, passkeyIdentityCookie, "/")
+	clearCookie(w, r, totpIdentityCookie, "/")
+	rawSession, err := s.Store.CreateTOTPLoginIdentitySession(r.Context(), identity.ID, step)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	setCookie(w, r, "fmly_session", rawSession, "/", int(store.MemberSessionTTL.Seconds()))
-	redirect(w, r, "/")
+	setCookie(w, r, totpIdentityCookie, rawSession, "/", int(store.TOTPLoginIdentitySessionTTL.Seconds()))
+	redirect(w, r, "/login/2fa/pending")
 }
 
 func (s *Server) renderTOTPLoginError(w http.ResponseWriter, r *http.Request, message, username string) {

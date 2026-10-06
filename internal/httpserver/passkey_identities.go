@@ -228,6 +228,8 @@ func (s *Server) passkeyIdentityLoginFinish(w http.ResponseWriter, r *http.Reque
 
 func (s *Server) establishPasskeyIdentitySession(w http.ResponseWriter, r *http.Request, identityID, memberID int64) error {
 	s.Store.DeletePasskeyLoginIdentitySession(r.Context(), cookieValue(r, passkeyIdentityCookie))
+	s.Store.DeleteTOTPLoginIdentitySession(r.Context(), cookieValue(r, totpIdentityCookie))
+	clearCookie(w, r, totpIdentityCookie, "/")
 	raw, err := s.Store.CreatePasskeyLoginIdentitySession(r.Context(), identityID)
 	if err != nil {
 		return err
@@ -440,8 +442,10 @@ func (s *Server) adminDeletePasskeyCredential(w http.ResponseWriter, r *http.Req
 
 func (s *Server) passkeyIdentityLogout(w http.ResponseWriter, r *http.Request) {
 	s.Store.DeletePasskeyLoginIdentitySession(r.Context(), cookieValue(r, passkeyIdentityCookie))
+	s.Store.DeleteTOTPLoginIdentitySession(r.Context(), cookieValue(r, totpIdentityCookie))
 	s.Store.DeleteMemberSession(r.Context(), cookieValue(r, "fmly_session"))
 	clearCookie(w, r, passkeyIdentityCookie, "/")
+	clearCookie(w, r, totpIdentityCookie, "/")
 	clearCookie(w, r, "fmly_session", "/")
 	redirect(w, r, "/login")
 }

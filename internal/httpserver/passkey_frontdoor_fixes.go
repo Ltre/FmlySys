@@ -14,10 +14,9 @@ type passkeyHomeView struct {
 	Identity        store.PasskeyLoginIdentityView
 }
 
-// WithPasskeyFrontDoorFixes makes a valid Passkey identity session a real
-// front-end login state. Family-data authorization still comes from member
-// association and member permissions; an unbound Passkey identity gets the
-// authenticated home shell without family business permissions.
+// WithPasskeyFrontDoorFixes resolves authenticated login identities at the
+// front door. Family-data authorization still comes from member association
+// and member permissions; unbound identities do not receive family access.
 func (s *Server) WithPasskeyFrontDoorFixes(next http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.passkeyAwareDashboard)
@@ -66,15 +65,40 @@ func (s *Server) passkeyAwareDashboard(w http.ResponseWriter, r *http.Request) {
 		clearCookie(w, r, "fmly_session", "/")
 	}
 
-	identity, _, err := s.Store.PasskeyLoginIdentityFromSession(r.Context(), cookieValue(r, passkeyIdentityCookie))
+	totpRaw := cookieValue(r, totpIdentityCookie)
+	if totpRaw != "" {
+		identity, err := s.Store.TOTPLoginIdentityFromSession(r.Context(), totpRaw)
+		if err == nil {
+			if identity.MemberID <= 0 || identity.MemberName == "" {
+				redirect(w, r, "/login/2fa/pending")
+				return
+			}
+			member, permissions, err := s.ensureMemberSessionForID(w, r, identity.MemberID)
+			if err != nil {
+				s.fail(w, r, err)
+				return
+			}
+			s.renderDashboardForMember(w, r, member, permissions)
+			return
+		}
+		s.Store.DeleteTOTPLoginIdentitySession(r.Context(), totpRaw)
+		clearCookie(w, r, totpIdentityCookie, "/")
+	}
+
+	passkeyRaw := cookieValue(r, passkeyIdentityCookie)
+	identity, _, err := s.Store.PasskeyLoginIdentityFromSession(r.Context(), passkeyRaw)
 	if err != nil {
 		clearCookie(w, r, passkeyIdentityCookie, "/")
 		redirect(w, r, "/login")
 		return
 	}
 
-	if identity.MemberID > 0 {
-		member, err := s.Store.MemberByID(r.Context(), identity.MemberID)
+	memberID := identity.MemberID
+	if effectiveMemberID, effectiveErr := s.Store.PasskeyLoginSessionEffectiveMember(r.Context(), passkeyRaw); effectiveErr == nil {
+		memberID = effectiveMemberID
+	}
+	if memberID > 0 {
+		member, err := s.Store.MemberByID(r.Context(), memberID)
 		if err != nil {
 			s.renderUnboundPasskeyHome(w, identity)
 			return
@@ -115,15 +139,49 @@ func (s *Server) renderUnboundPasskeyHome(w http.ResponseWriter, identity store.
 }
 
 func (s *Server) frontAccountEntry(w http.ResponseWriter, r *http.Request) {
-	if _, _, err := s.Store.PasskeyLoginIdentityFromSession(r.Context(), cookieValue(r, passkeyIdentityCookie)); err == nil {
-		redirect(w, r, "/passkey/account")
-		return
-	}
 	if raw := cookieValue(r, "fmly_session"); raw != "" {
-		if _, _, err := s.Store.MemberFromSession(r.Context(), raw); err == nil {
-			redirect(w, r, "/passkeys")
+		if member, _, err := s.Store.MemberFromSession(r.Context(), raw); err == nil {
+			s.renderAccountLoginMethods(w, r, member)
 			return
 		}
+		s.Store.DeleteMemberSession(r.Context(), raw)
+		clearCookie(w, r, "fmly_session", "/")
+	}
+	if raw := cookieValue(r, totpIdentityCookie); raw != "" {
+		identity, err := s.Store.TOTPLoginIdentityFromSession(r.Context(), raw)
+		if err == nil {
+			if identity.MemberID <= 0 || identity.MemberName == "" {
+				redirect(w, r, "/login/2fa/pending")
+				return
+			}
+			member, _, err := s.ensureMemberSessionForID(w, r, identity.MemberID)
+			if err != nil {
+				s.fail(w, r, err)
+				return
+			}
+			s.renderAccountLoginMethods(w, r, member)
+			return
+		}
+		s.Store.DeleteTOTPLoginIdentitySession(r.Context(), raw)
+		clearCookie(w, r, totpIdentityCookie, "/")
+	}
+	passkeyRaw := cookieValue(r, passkeyIdentityCookie)
+	if identity, _, err := s.Store.PasskeyLoginIdentityFromSession(r.Context(), passkeyRaw); err == nil {
+		memberID := identity.MemberID
+		if effectiveMemberID, effectiveErr := s.Store.PasskeyLoginSessionEffectiveMember(r.Context(), passkeyRaw); effectiveErr == nil {
+			memberID = effectiveMemberID
+		}
+		if memberID <= 0 {
+			redirect(w, r, "/")
+			return
+		}
+		member, _, err := s.ensureMemberSessionForID(w, r, memberID)
+		if err != nil {
+			redirect(w, r, "/")
+			return
+		}
+		s.renderAccountLoginMethods(w, r, member)
+		return
 	}
 	redirect(w, r, "/login")
 }

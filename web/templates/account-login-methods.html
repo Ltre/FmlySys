@@ -1,0 +1,59 @@
+{{define "account-login-methods.html"}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/mobile.css">
+  <link rel="stylesheet" href="/static/interaction.css">
+  <style>
+    .account-method{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;padding:16px 0;border-top:1px solid #e8ebef}
+    .account-method:first-of-type{border-top:0}
+    .account-method p{margin:6px 0 0}
+    .account-method dl{display:grid;grid-template-columns:auto auto;gap:4px 12px;margin:0;text-align:right;font-size:.9rem}
+    .account-method dt{color:#68717d}.account-method dd{margin:0}
+    @media(max-width:600px){.account-method{display:block}.account-method dl{margin-top:12px;text-align:left;grid-template-columns:100px 1fr}}
+  </style>
+</head>
+<body>
+  <nav class="app-nav front-nav">
+    <strong class="nav-brand">FmlySys</strong>
+    <div class="nav-links"><a href="/">首页</a><a href="/assets">公共资产</a></div>
+    <div class="nav-account"><span class="nav-user">{{.Member.Name}}</span><form method="post" action="/logout" class="nav-form"><button class="link-button">退出</button></form></div>
+  </nav>
+  <main class="wrap">
+    <div class="section-head">
+      <div><h1>账号 / 登录身份管理</h1><p class="muted">当前家庭成员：{{.Member.Name}} · {{.Member.Relation}} · 数据分区：{{.Partition}}</p></div>
+    </div>
+    <section class="notice"><strong>当前成员可用的登录身份</strong><p>以下身份已由管理员关联到当前家庭成员。不同登录方式各自独立验证，身份备注用于帮助辨认。</p></section>
+
+    <section class="card">
+      <h2>Passkey 登录身份</h2>
+      {{range .Passkeys}}
+      <article class="account-method">
+        <div><strong>{{if .IdentityRemark}}{{.IdentityRemark}}{{else}}Passkey 登录身份{{end}}</strong><p class="muted">手机号 {{.Phone}} · 凭据备注：{{if .CredentialRemark}}{{.CredentialRemark}}{{else}}未填写{{end}}</p></div>
+        <dl><dt>RP 域名</dt><dd><code>{{.RPID}}</code></dd><dt>创建时间</dt><dd><time data-fmly-datetime="{{.CreatedAt}}">{{.CreatedAt}}</time></dd><dt>最近使用</dt><dd>{{if .LastUsedAt}}<time data-fmly-datetime="{{.LastUsedAt}}">{{.LastUsedAt}}</time>{{else}}尚未记录{{end}}</dd></dl>
+      </article>
+      {{else}}<p class="muted">当前成员尚未关联 Passkey 登录身份。</p>{{end}}
+    </section>
+
+    <section class="card">
+      <h2>2FA 登录身份</h2>
+      {{range .TOTPMethods}}
+      <article class="account-method"><div><strong>{{.Username}}</strong><p class="muted">{{if .ProfileRemark}}{{.ProfileRemark}}{{else}}未填写补充备注{{end}}</p></div><p class="muted">创建于 <time data-fmly-datetime="{{.CreatedAt}}">{{.CreatedAt}}</time></p></article>
+      {{else}}<p class="muted">当前成员尚未关联 2FA 登录身份。</p>{{end}}
+    </section>
+
+    <section class="card">
+      <h2>微信登录身份</h2>
+      {{range .WeChat}}
+      <article class="account-method"><div><strong>{{if .Nickname}}{{.Nickname}}{{else}}微信账号{{end}}</strong><p class="muted">已关联的微信登录身份</p></div><p class="muted">关联于 <time data-fmly-datetime="{{.CreatedAt}}">{{.CreatedAt}}</time></p></article>
+      {{else}}<p class="muted">当前成员尚未关联微信登录身份。</p>{{end}}
+    </section>
+  </main>
+  <script src="/static/timezone.js" defer></script>
+</body>
+</html>
+{{end}}

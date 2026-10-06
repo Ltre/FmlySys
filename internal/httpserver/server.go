@@ -139,6 +139,7 @@ func (s *Server) routes() {
 	// Member authentication and join request flow.
 	s.mux.HandleFunc("GET /login", s.loginPage)
 	s.mux.HandleFunc("GET /login/2fa", s.totpLoginPage)
+	s.mux.HandleFunc("GET /login/2fa/pending", s.totpLoginPendingPage)
 	s.mux.HandleFunc("POST /auth/2fa/login", s.totpLogin)
 	s.mux.HandleFunc("POST /auth/2fa/register", s.totpRegister)
 	s.mux.HandleFunc("GET /auth/2fa/register/qr", s.totpRegisterQRCode)
@@ -248,9 +249,29 @@ func (s *Server) member(permission string, next http.HandlerFunc) http.HandlerFu
 		raw := cookieValue(r, "fmly_session")
 		m, perms, err := s.Store.MemberFromSession(r.Context(), raw)
 		if err != nil {
-			clearCookie(w, r, "fmly_session", "/")
-			redirect(w, r, "/login")
-			return
+			identityRaw := cookieValue(r, totpIdentityCookie)
+			identity, identityErr := s.Store.TOTPLoginIdentityFromSession(r.Context(), identityRaw)
+			if identityErr != nil {
+				if identityRaw != "" {
+					s.Store.DeleteTOTPLoginIdentitySession(r.Context(), identityRaw)
+					clearCookie(w, r, totpIdentityCookie, "/")
+				}
+				if raw != "" {
+					s.Store.DeleteMemberSession(r.Context(), raw)
+				}
+				clearCookie(w, r, "fmly_session", "/")
+				redirect(w, r, "/login")
+				return
+			}
+			if identity.MemberID <= 0 || identity.MemberName == "" {
+				redirect(w, r, "/login/2fa/pending")
+				return
+			}
+			m, perms, err = s.ensureMemberSessionForID(w, r, identity.MemberID)
+			if err != nil {
+				s.fail(w, r, err)
+				return
+			}
 		}
 		if permission != "" && !perms[permission] {
 			http.Error(w, "你没有执行该操作的家族权限", http.StatusForbidden)
@@ -429,7 +450,9 @@ func (s *Server) submitJoin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) memberLogout(w http.ResponseWriter, r *http.Request) {
 	s.Store.DeleteMemberSession(r.Context(), cookieValue(r, "fmly_session"))
+	s.Store.DeleteTOTPLoginIdentitySession(r.Context(), cookieValue(r, totpIdentityCookie))
 	clearCookie(w, r, "fmly_session", "/")
+	clearCookie(w, r, totpIdentityCookie, "/")
 	redirect(w, r, "/login")
 }
 

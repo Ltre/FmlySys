@@ -1,0 +1,29 @@
+{{define "totp-pending.html"}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/mobile.css">
+  <link rel="stylesheet" href="/static/interaction.css">
+  <style>.narrow-wrap{max-width:620px;padding-top:8vh}</style>
+</head>
+<body>
+  <main class="wrap narrow-wrap">
+    <section class="card">
+      <div class="section-head"><div><p class="eyebrow">FmlySys · 2FA</p><h1>{{if .Inactive}}家庭成员暂不可用{{else}}等待管理员关联{{end}}</h1></div><form method="post" action="/logout"><button class="link-button">退出登录</button></form></div>
+      <div class="notice ok"><strong>2FA 身份验证成功</strong><p>用户名：{{.Identity.Username}}{{if .Identity.ProfileRemark}} · {{.Identity.ProfileRemark}}{{end}}</p></div>
+      {{if .Inactive}}
+      <div class="notice danger"><strong>关联的家庭成员当前不可用</strong><p>你的 2FA 身份已经通过验证，但关联成员已停用或不可用。请联系管理员处理关联。</p></div>
+      {{else}}
+      <p>当前 2FA 登录身份已经验证成功，但尚未分配家庭成员身份。请等待管理员将此身份关联到你的家庭成员。</p>
+      <p class="muted">管理员完成关联后，这个已验证的登录身份即可进入系统。你可以稍后刷新本页，系统会重新检查关联状态。</p>
+      {{end}}
+      <p><a class="secondary-button" href="/login/2fa/pending">重新检查关联状态</a></p>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}
