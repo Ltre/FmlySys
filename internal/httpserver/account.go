@@ -9,12 +9,14 @@ import (
 const totpIdentityCookie = "fmly_totp_identity"
 
 type accountLoginMethodsView struct {
-	Title       string
-	Member      store.Member
-	Partition   string
-	Passkeys    []store.MemberPasskeyLoginMethod
-	TOTPMethods []store.MemberTOTPLoginMethod
-	WeChat      []store.MemberWeChatLoginMethod
+	Title         string
+	AdminUsername string
+	CurrentMember store.Member
+	Permissions   map[string]bool
+	Partition     string
+	Passkeys      []store.MemberPasskeyLoginMethod
+	TOTPMethods   []store.MemberTOTPLoginMethod
+	WeChat        []store.MemberWeChatLoginMethod
 }
 
 type totpPendingView struct {
@@ -39,14 +41,20 @@ func (s *Server) renderAccountLoginMethods(w http.ResponseWriter, r *http.Reques
 		s.fail(w, r, err)
 		return
 	}
+	permissions, err := s.Store.MemberPermissions(r.Context(), member.ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	v := accountLoginMethodsView{
-		Title:       "账号 / 登录身份管理",
-		Member:      member,
-		Partition:   s.PM.ActiveID,
-		Passkeys:    passkeys,
-		TOTPMethods: totpMethods,
-		WeChat:      wechatMethods,
+		Title:         "账号 / 登录身份管理",
+		CurrentMember: member,
+		Permissions:   permissions,
+		Partition:     s.PM.ActiveID,
+		Passkeys:      passkeys,
+		TOTPMethods:   totpMethods,
+		WeChat:        wechatMethods,
 	}
 	if err := s.Templates.ExecuteTemplate(w, "account-login-methods.html", v); err != nil {
 		http.Error(w, "账号管理页面暂时不可用", http.StatusInternalServerError)

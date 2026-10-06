@@ -18,14 +18,10 @@
   </style>
 </head>
 <body>
-  <nav class="app-nav front-nav">
-    <strong class="nav-brand">FmlySys</strong>
-    <div class="nav-links"><a href="/">首页</a><a href="/assets">公共资产</a></div>
-    <div class="nav-account"><span class="nav-user">{{.Member.Name}}</span><form method="post" action="/logout" class="nav-form"><button class="link-button">退出</button></form></div>
-  </nav>
+  {{template "nav" .}}
   <main class="wrap">
     <div class="section-head">
-      <div><h1>账号 / 登录身份管理</h1><p class="muted">当前家庭成员：{{.Member.Name}} · {{.Member.Relation}} · 数据分区：{{.Partition}}</p></div>
+      <div><h1>账号 / 登录身份管理</h1><p class="muted">当前家庭成员：{{.CurrentMember.Name}} · {{.CurrentMember.Relation}} · 数据分区：{{.Partition}}</p></div>
     </div>
     <section class="notice"><strong>当前成员可用的登录身份</strong><p>以下身份已由管理员关联到当前家庭成员。不同登录方式各自独立验证，身份备注用于帮助辨认。</p></section>
 
@@ -53,7 +49,6 @@
       {{else}}<p class="muted">当前成员尚未关联微信登录身份。</p>{{end}}
     </section>
   </main>
-  <script src="/static/timezone.js" defer></script>
 </body>
 </html>
 {{end}}
