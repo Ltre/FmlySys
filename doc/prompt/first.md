@@ -1,3 +1,16 @@
+有空研究这两个SKILL:
+    PUA
+        - https://github.com/tanweai/pua
+        - https://github.com/tanweai/pua/blob/main/skills/pua/SKILL.md
+        - https://openpua.ai/
+    mattpocock
+        - https://github.com/mattpocock/skills
+
+
+
+
+
+
 问：
 
 -----------------
