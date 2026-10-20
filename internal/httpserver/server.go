@@ -167,6 +167,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /assets/expenses", s.member("expenses.create", s.createExpense))
 	s.mux.HandleFunc("GET /assets/expenses/{id}/edit", s.memberOrAdmin("assets.view", s.editExpense))
 	s.mux.HandleFunc("POST /assets/expenses/{id}", s.memberOrAdmin("expenses.edit", s.updateExpense))
+	s.mux.HandleFunc("POST /assets/expenses/{id}/attachments", s.memberOrAdmin("expenses.edit", s.addExpenseEvidence))
+	s.mux.HandleFunc("POST /assets/expenses/{id}/attachments/{attachmentID}/delete", s.memberOrAdmin("expenses.edit", s.deleteExpenseEvidence))
 	s.mux.HandleFunc("POST /assets/transfers", s.member("transfers.create", s.createTransfer))
 	s.mux.HandleFunc("POST /assets/reimbursements", s.member("reimbursements.create", s.createReimbursement))
 	s.mux.HandleFunc("GET /evidence/{id}", s.memberOrAdmin("assets.view", s.evidence))
@@ -1083,6 +1085,30 @@ func (s *Server) updateExpense(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirect(w, r, "/assets/expenses/"+strconv.FormatInt(id, 10)+"/edit")
+}
+
+func (s *Server) addExpenseEvidence(w http.ResponseWriter, r *http.Request) {
+	files, err := parseWorkflowRequest(w, r, true)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	id := parseID(r.PathValue("id"))
+	if err := s.Store.AddExpenseEvidence(r.Context(), s.businessActor(r), id, evidenceDir(s), files); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, "/assets/expenses/"+strconv.FormatInt(id, 10)+"/edit#evidence")
+}
+
+func (s *Server) deleteExpenseEvidence(w http.ResponseWriter, r *http.Request) {
+	id := parseID(r.PathValue("id"))
+	attachmentID := parseID(r.PathValue("attachmentID"))
+	if err := s.Store.DeleteExpenseEvidence(r.Context(), s.businessActor(r), id, attachmentID, evidenceDir(s)); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, "/assets/expenses/"+strconv.FormatInt(id, 10)+"/edit#evidence")
 }
 
 func (s *Server) evidence(w http.ResponseWriter, r *http.Request) {
