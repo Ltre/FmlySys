@@ -437,6 +437,63 @@
 
 
 
+问：
+
+
+    1、信息共享、家族事务也需要显示附件中的图片
+
+
+答：
+
+
+    我会沿用现有图片预览交互，先查信息共享和家族事务的附件存储、展示页面及访问权限，再把图片显示接进去，避免改动非图片附件的现有行为。
+
+    运行了命令
+
+    上下文已自动压缩
+
+    已读取文件运行了命令
+
+    我查到信息共享已有附件下载，但家族事务目前没有附件上传或列表。要让事务也能显示附件图片，我会补齐事务附件的上传、访问和展示，并沿用现有的图片预览组件。
+
+    编辑了文件读取文件运行了命令
+
+    信息共享图片现在可在附件列表中预览；事务页也已接入附件上传和预览。我接下来会重点验收权限边界：只有具备对应查看权限的成员才能打开原图，附件管理仍按事务创建人的权限规则执行。
+
+    编辑了文件运行了命令
+
+    实现后的定向测试首次运行遇到 Go 构建缓存访问被拒绝，测试本身尚未完成。我会按顺序重跑；如果仍是权限问题，再用获批的执行权限完成验收。
+
+    编辑了文件运行了命令
+
+    图片预览与权限的定向测试已通过，HTTP 服务测试也全部通过；普通附件仍保持下载行为。此前存储层测试有一项与本次功能无关的权限用例失败，我会再跑一次全仓测试和编译，明确最终验收范围。
+
+    编辑了文件运行了命令
+
+    已完成：信息共享的图片附件现在可显示缩略图并点击预览；家族事务新增附件上传、显示、预览和删除入口。图片访问仍受各自的查看权限控制，非图片附件保持下载行为。
+
+    `go build ./...` 和 HTTP 服务测试通过。全仓测试仍有一项与本次修改无关的既有失败：`TestNormalizePermissionsAddsViewDependencies` 报 `未知成员权限：medication.manage`。未提交或暂存文件；原有的 `doc/prompt/prompt-2610.md` 改动未触碰。
+
+    已编辑 10 个文件+339-26查看变更撤销查看变更
+
+    internal/store/evidence.gointernal/store/evidence.go+5-5
+    internal/store/matter.gointernal/store/matter.go+14-14
+    internal/store/models.gointernal/store/models.go+1-0
+    internal/httpserver/asset_workflow_fixes.gointernal/httpserver/asset_workflow_fixes.go+2-2
+    internal/httpserver/server.gointernal/httpserver/server.go+81-3
+    internal/store/matter_attachments.gointernal/store/matter_attachments.go+49-0
+    internal/httpserver/request_deadline.gointernal/httpserver/request_deadline.go+2-1
+    web/static/evidence-image-preview.jsweb/static/evidence-image-preview.js+1-1
+    web/templates/matters.htmlweb/templates/matters.html+6-0
+    internal/httpserver/shared_matter_image_preview_test.gointernal/httpserver/shared_matter_image_preview_test.go+178-0
+
+
+
+问：
+
+    1、信息共享编辑页要支持附件删除、上传。
+
+
 
 待问：
 

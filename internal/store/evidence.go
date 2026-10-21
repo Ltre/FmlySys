@@ -144,10 +144,10 @@ func (s *Store) EvidenceFor(ctx context.Context, entityType string, entityID int
 	return out, rows.Err()
 }
 
-func (s *Store) EvidencePath(ctx context.Context, id int64, uploadDir string) (string, string, error) {
-	var storage, original string
-	if err := s.DB.QueryRowContext(ctx, `SELECT storage_name,original_name FROM record_attachments WHERE id=?`, id).Scan(&storage, &original); err != nil {
-		return "", "", err
+func (s *Store) EvidencePath(ctx context.Context, id int64, uploadDir string) (string, string, string, error) {
+	var storage, original, entityType string
+	if err := s.DB.QueryRowContext(ctx, `SELECT storage_name,original_name,entity_type FROM record_attachments WHERE id=?`, id).Scan(&storage, &original, &entityType); err != nil {
+		return "", "", "", err
 	}
-	return filepath.Join(uploadDir, storage), original, nil
+	return filepath.Join(uploadDir, storage), original, entityType, nil
 }

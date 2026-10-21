@@ -159,6 +159,7 @@ type Matter struct {
 	ParentTitle, Title, Type, Description, Status, StartDate, DueDate, OwnerName string
 	CreatorName                                                                  string
 	ExpenseCent                                                                  int64
+	Attachments                                                                  []Evidence
 }
 type Archive struct {
 	ID                                                                    int64

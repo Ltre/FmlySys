@@ -34,7 +34,13 @@
         </div>
         {{if or $matter.StartDate $matter.DueDate}}<p class="muted">日期：{{$matter.StartDate}}{{if $matter.DueDate}} → {{$matter.DueDate}}{{end}}</p>{{end}}
         <p class="pre-wrap">{{$matter.Description}}</p>
+        <div class="archive-attachments">
+          {{range $matter.Attachments}}
+          <div class="archive-attachment-item"><a class="attachment" href="/matter-files/{{.ID}}">📎 {{.OriginalName}}</a>{{if canManageCreated $.Permissions $.CurrentMember.ID $matter.CreatedBy "matters"}}<form method="post" action="/matters/{{$matter.ID}}/attachments/{{.ID}}/delete" data-no-async="1" onsubmit="return confirm('确认删除这个附件？删除后无法恢复。')"><button class="danger-button">删除附件</button></form>{{end}}</div>
+          {{end}}
+        </div>
         {{if canManageCreated $.Permissions $.CurrentMember.ID $matter.CreatedBy "matters"}}
+        <form method="post" action="/matters/{{$matter.ID}}/attachments" enctype="multipart/form-data" class="form archive-upload" data-no-async="1"><label class="wide upload"><strong>添加事务附件</strong><span>可一次选择多个文件；单个文件最大 10MB，最多 20 个</span><input type="file" name="file" multiple required></label><button>上传附件</button></form>
         <details class="inline-editor">
           <summary class="secondary-button">完整编辑事务</summary>
           <form method="post" action="/matters/{{$matter.ID}}" class="form inner-form" data-success="事务已更新">

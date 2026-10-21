@@ -177,6 +177,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /matters", s.member("matters.manage_self", s.createMatter))
 	s.mux.HandleFunc("POST /matters/{id}", s.member("matters.view", s.updateMatter))
 	s.mux.HandleFunc("POST /matters/{id}/status", s.member("matters.view", s.setMatterStatus))
+	s.mux.HandleFunc("POST /matters/{id}/attachments", s.member("matters.view", s.uploadMatterAttachment))
+	s.mux.HandleFunc("POST /matters/{id}/attachments/{attachmentID}/delete", s.member("matters.view", s.deleteMatterAttachment))
+	s.mux.HandleFunc("GET /matter-files/{id}", s.member("matters.view", s.matterFile))
 	s.mux.HandleFunc("GET /share", s.member("share.view", s.share))
 	s.mux.HandleFunc("GET /share-info", s.member("share.view", s.shareInfo))
 	s.mux.HandleFunc("POST /share", s.member("share.manage_self", s.createArchive))
@@ -830,6 +833,13 @@ func (s *Server) matters(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	for i := range v.Matters {
+		v.Matters[i].Attachments, err = s.Store.EvidenceFor(r.Context(), "matter", v.Matters[i].ID)
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
 	s.render(w, "matters.html", v)
 }
 
@@ -1139,8 +1149,8 @@ func (s *Server) deleteExpenseEvidence(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) evidence(w http.ResponseWriter, r *http.Request) {
-	path, name, err := s.Store.EvidencePath(r.Context(), parseID(r.PathValue("id")), evidenceDir(s))
-	if err != nil {
+	path, name, entityType, err := s.Store.EvidencePath(r.Context(), parseID(r.PathValue("id")), evidenceDir(s))
+	if err != nil || entityType == "matter" {
 		http.NotFound(w, r)
 		return
 	}
@@ -1215,6 +1225,64 @@ func (s *Server) setMatterStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirect(w, r, "/matters")
+}
+
+func (s *Server) uploadMatterAttachment(w http.ResponseWriter, r *http.Request) {
+	matterID := parseID(r.PathValue("id"))
+	creatorID, err := s.Store.MatterCreatorID(r.Context(), matterID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if !requireCreatedRecordPermission(w, r, creatorID, "matters") {
+		return
+	}
+	if err := r.ParseMultipartForm(220 << 20); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	defer r.MultipartForm.RemoveAll()
+	files := r.MultipartForm.File["file"]
+	if len(files) == 0 {
+		s.fail(w, r, fmt.Errorf("请选择附件"))
+		return
+	}
+	if err := store.ValidateEvidenceFiles(files); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if err := s.Store.SaveEvidenceFiles(r.Context(), currentMember(r).ID, "matter", matterID, evidenceDir(s), files); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, "/matters#matter-"+r.PathValue("id"))
+}
+
+func (s *Server) deleteMatterAttachment(w http.ResponseWriter, r *http.Request) {
+	matterID := parseID(r.PathValue("id"))
+	creatorID, err := s.Store.MatterCreatorID(r.Context(), matterID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if !requireCreatedRecordPermission(w, r, creatorID, "matters") {
+		return
+	}
+	if err := s.Store.DeleteMatterAttachment(r.Context(), currentMember(r).ID, matterID,
+		parseID(r.PathValue("attachmentID")), evidenceDir(s)); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, "/matters#matter-"+r.PathValue("id"))
+}
+
+func (s *Server) matterFile(w http.ResponseWriter, r *http.Request) {
+	path, name, entityType, err := s.Store.EvidencePath(r.Context(), parseID(r.PathValue("id")), evidenceDir(s))
+	if err != nil || entityType != "matter" {
+		http.NotFound(w, r)
+		return
+	}
+	servePreviewableAttachment(w, r, path, name)
 }
 
 func (s *Server) createArchive(w http.ResponseWriter, r *http.Request) {
@@ -1345,7 +1413,17 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", strings.ReplaceAll(name, "\"", "")))
+	servePreviewableAttachment(w, r, path, name)
+}
+
+func servePreviewableAttachment(w http.ResponseWriter, r *http.Request, path, name string) {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic", ".heif":
+		w.Header().Set("Content-Disposition", "inline")
+	default:
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", strings.ReplaceAll(name, "\"", "")))
+	}
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeFile(w, r, path)
 }
 

@@ -264,8 +264,8 @@ func evidenceInlineWorkflow(name string) bool {
 }
 
 func (s *Server) evidencePreviewWorkflow(w http.ResponseWriter, r *http.Request) {
-	path, name, err := s.Store.EvidencePath(r.Context(), parseID(r.PathValue("id")), evidenceDir(s))
-	if err != nil {
+	path, name, entityType, err := s.Store.EvidencePath(r.Context(), parseID(r.PathValue("id")), evidenceDir(s))
+	if err != nil || entityType == "matter" {
 		http.NotFound(w, r)
 		return
 	}

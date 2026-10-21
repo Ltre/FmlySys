@@ -1,6 +1,6 @@
 (() => {
   const imageName = /\.(?:jpe?g|png|gif|webp|bmp|heic|heif)$/i;
-  const links = [...document.querySelectorAll('a.attachment[href^="/evidence/"]')]
+  const links = [...document.querySelectorAll('a.attachment[href^="/evidence/"], a.attachment[href^="/files/"], a.attachment[href^="/matter-files/"]')]
     .filter((link) => imageName.test(link.textContent.trim()));
   if (!links.length) return;
 

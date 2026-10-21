@@ -16,7 +16,8 @@ func WithRequestDeadline(next http.Handler, timeout time.Duration) http.Handler 
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/") ||
-			strings.HasPrefix(r.URL.Path, "/files/") || strings.HasPrefix(r.URL.Path, "/evidence/") {
+			strings.HasPrefix(r.URL.Path, "/files/") || strings.HasPrefix(r.URL.Path, "/evidence/") ||
+			strings.HasPrefix(r.URL.Path, "/matter-files/") {
 			next.ServeHTTP(w, r)
 			return
 		}
