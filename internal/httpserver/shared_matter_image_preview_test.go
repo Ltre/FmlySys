@@ -134,6 +134,20 @@ func TestSharedAndMatterImagePreviewPermissions(t *testing.T) {
 	if sharePage.Code != http.StatusOK || !strings.Contains(sharePage.Body.String(), `href="`+sharePath+`"`) || !strings.Contains(sharePage.Body.String(), `/static/evidence-image-preview.js`) {
 		t.Fatalf("share attachment preview missing, status=%d", sharePage.Code)
 	}
+	if strings.Contains(sharePage.Body.String(), "管理附件") || strings.Contains(sharePage.Body.String(), "/attachments/"+strconv.FormatInt(attachments[0].ID, 10)+"/delete") {
+		t.Fatal("viewer must not see share attachment management controls")
+	}
+	editPage := serve(http.MethodGet, "/share-info?id="+strconv.FormatInt(archiveID, 10)+"&edit=1", ownerToken, "", nil)
+	if editPage.Code != http.StatusOK || !strings.Contains(editPage.Body.String(), `id="share-editor" open`) ||
+		!strings.Contains(editPage.Body.String(), `action="`+archivePath+`"`) ||
+		!strings.Contains(editPage.Body.String(), `/attachments/`+strconv.FormatInt(attachments[0].ID, 10)+`/delete`) {
+		t.Fatalf("share editor attachment controls missing, status=%d", editPage.Code)
+	}
+	updated := serve(http.MethodPost, "/share/"+strconv.FormatInt(archiveID, 10), ownerToken,
+		"application/x-www-form-urlencoded", []byte("title=updated&category=family&content=photo"))
+	if updated.Code != http.StatusSeeOther || !strings.Contains(updated.Header().Get("Location"), "edit=1#share-editor") {
+		t.Fatalf("share update does not return to open editor, status=%d, location=%q", updated.Code, updated.Header().Get("Location"))
+	}
 	previewScript := serve(http.MethodGet, "/static/evidence-image-preview.js", "", "", nil)
 	if previewScript.Code != http.StatusOK || !strings.Contains(previewScript.Body.String(), `href^="/files/"`) || !strings.Contains(previewScript.Body.String(), `href^="/matter-files/"`) {
 		t.Fatalf("shared/matter image links are not enhanced by preview script, status=%d", previewScript.Code)
@@ -153,6 +167,8 @@ func TestSharedAndMatterImagePreviewPermissions(t *testing.T) {
 	textForm, textType := fileForm("说明.txt", []byte("ordinary attachment"))
 	if uploaded := serve(http.MethodPost, archivePath, ownerToken, textType, textForm); uploaded.Code != http.StatusSeeOther {
 		t.Fatalf("text upload status=%d: %s", uploaded.Code, uploaded.Body.String())
+	} else if !strings.Contains(uploaded.Header().Get("Location"), "edit=1#share-editor") {
+		t.Fatalf("share upload does not return to open editor: %q", uploaded.Header().Get("Location"))
 	}
 	attachments, err = st.Attachments(ctx, archiveID)
 	if err != nil || len(attachments) != 2 {
@@ -161,6 +177,16 @@ func TestSharedAndMatterImagePreviewPermissions(t *testing.T) {
 	textResponse := serve(http.MethodGet, "/files/"+strconv.FormatInt(attachments[1].ID, 10), viewerToken, "", nil)
 	if textResponse.Code != http.StatusOK || !strings.HasPrefix(textResponse.Header().Get("Content-Disposition"), "attachment;") {
 		t.Fatalf("non-image response status=%d, disposition=%q", textResponse.Code, textResponse.Header().Get("Content-Disposition"))
+	}
+	deleteSharePath := "/share/" + strconv.FormatInt(archiveID, 10) + "/attachments/" + strconv.FormatInt(attachments[0].ID, 10) + "/delete"
+	if denied := serve(http.MethodPost, deleteSharePath, viewerToken, "", nil); denied.Code != http.StatusForbidden {
+		t.Fatalf("viewer share delete status=%d", denied.Code)
+	}
+	if deleted := serve(http.MethodPost, deleteSharePath, ownerToken, "", nil); deleted.Code != http.StatusSeeOther || !strings.Contains(deleted.Header().Get("Location"), "edit=1#share-editor") {
+		t.Fatalf("owner share delete status=%d, location=%q", deleted.Code, deleted.Header().Get("Location"))
+	}
+	if missing := serve(http.MethodGet, sharePath, viewerToken, "", nil); missing.Code != http.StatusNotFound {
+		t.Fatalf("deleted share file status=%d", missing.Code)
 	}
 	if err := st.DeleteMatterAttachment(ctx, ownerID, matters[0].ID, matterAttachments[0].ID+10000, evidenceDir(app)); err == nil {
 		t.Fatal("an unrelated attachment cannot be removed from the matter")

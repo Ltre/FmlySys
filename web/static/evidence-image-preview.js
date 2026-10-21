@@ -4,6 +4,17 @@
     .filter((link) => imageName.test(link.textContent.trim()));
   if (!links.length) return;
 
+  // Table cells contain bare attachment links. Give each set its own wrapping
+  // layout so multiple thumbnails stay together on narrow screens.
+  for (const cell of new Set(links.map((link) => link.parentElement).filter((parent) => parent?.tagName === 'TD'))) {
+    const attachments = [...cell.children].filter((child) => child.matches('a.attachment'));
+    if (!attachments.length) continue;
+    const gallery = document.createElement('div');
+    gallery.className = 'attachment-gallery';
+    cell.insertBefore(gallery, attachments[0]);
+    for (const attachment of attachments) gallery.appendChild(attachment);
+  }
+
   const dialog = document.createElement('dialog');
   dialog.className = 'evidence-preview';
   dialog.setAttribute('aria-labelledby', 'evidence-preview-title');
@@ -19,22 +30,26 @@
   dialog.addEventListener('close', () => image.removeAttribute('src'));
 
   for (const link of links) {
-    const name = link.textContent.trim();
+    const name = link.textContent.trim().replace(/^📎\s*/, '');
     let previewable = true;
     const thumbnail = document.createElement('img');
     thumbnail.className = 'evidence-thumbnail';
-    thumbnail.src = link.href;
     thumbnail.alt = '';
     thumbnail.loading = 'lazy';
     thumbnail.addEventListener('error', () => {
       previewable = false;
-      thumbnail.remove();
+      link.textContent = name;
       link.classList.remove('evidence-image-link');
       link.removeAttribute('aria-label');
     });
-    link.prepend(thumbnail);
+    const caption = document.createElement('span');
+    caption.className = 'evidence-image-name';
+    caption.textContent = name;
+    link.replaceChildren(thumbnail, caption);
     link.classList.add('evidence-image-link');
+    link.title = name;
     link.setAttribute('aria-label', `预览图片：${name}`);
+    thumbnail.src = link.href;
     link.addEventListener('click', (event) => {
       if (!previewable || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();

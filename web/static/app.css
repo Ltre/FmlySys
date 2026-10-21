@@ -202,8 +202,12 @@ details > summary::-webkit-details-marker { display: none; }
 .archive-attachments { display: grid; gap: 7px; margin: 12px 0; }
 .archive-attachment-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 9px; border: 1px solid #e5e8ec; border-radius: 8px; }
 .archive-attachment-item form { flex: 0 0 auto; }
-.evidence-image-link { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 116px; white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
-.evidence-thumbnail { width: 76px; height: 76px; object-fit: cover; border-radius: 6px; border: 1px solid #dce3ec; background: #f3f6fa; }
+.attachment-gallery { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; width: 248px; max-width: 100%; min-width: 0; }
+.attachment-gallery > .attachment:not(.evidence-image-link) { flex: 1 1 100%; }
+a.attachment.evidence-image-link { box-sizing: border-box; display: flex; flex: 0 0 112px; flex-direction: column; align-items: stretch; gap: 6px; width: 112px; max-width: 100%; min-width: 0; margin: 0; padding: 6px; border: 1px solid #dce3ec; border-radius: 8px; background: #f8fafc; color: #263445; text-decoration: none; vertical-align: top; }
+a.attachment.evidence-image-link:hover, a.attachment.evidence-image-link:focus-visible { border-color: #8ea9c8; background: #eef5ff; }
+.evidence-thumbnail { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 5px; background: #f3f6fa; }
+.evidence-image-name { display: -webkit-box; width: 100%; min-width: 0; min-height: 2.8em; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.4; font-size: 12px; text-align: center; }
 .evidence-preview { width: min(960px, calc(100% - 24px)); max-height: calc(100dvh - 24px); padding: 16px; border: 0; border-radius: 14px; background: #fff; color: #202124; box-shadow: 0 24px 80px rgba(0, 0, 0, .3); }
 .evidence-preview::backdrop { background: rgba(17, 24, 39, .78); }
 .evidence-preview-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
@@ -229,8 +233,8 @@ details > summary::-webkit-details-marker { display: none; }
 .archive-preview-summary { flex: 1 1 auto; min-height: 0; margin: 7px 0; overflow: hidden; color: #434a54; }
 .archive-preview-meta { margin-top: auto; font-size: 13px; color: #73777f; }
 .share-full-content { margin-top: 16px; line-height: 1.75; overflow-wrap: anywhere; }
-.share-edit-panel { flex: 0 1 680px; }
-.share-edit-panel[open] { width: min(680px, 100%); }
+.share-edit-panel > summary { width: fit-content; }
+.share-edit-panel .archive-attachments { margin-top: 10px; }
 .share-edit-panel .inner-form { margin-top: 10px; }
 
 .medication-wrap { max-width: 1120px; }
@@ -396,6 +400,7 @@ details > summary::-webkit-details-marker { display: none; }
   .archive-preview-card { aspect-ratio: 16 / 12; }
   .archive-preview-meta { align-items: flex-start; flex-direction: column; gap: 3px; }
   .share-edit-panel { width: 100%; }
+  .share-edit-panel > summary { width: 100%; }
   .medication-date-filter, .medication-record-form { grid-template-columns: 1fr; }
   .medication-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .medication-stats .card:last-child { grid-column: 1 / -1; }

@@ -72,6 +72,7 @@ type view struct {
 	Matters               []store.Matter
 	Archives              []store.Archive
 	Archive               store.Archive
+	ShareEditing          bool
 	MedicationDate        string
 	MedicationPlans       []store.MedicationPlan
 	MedicationSummary     store.MedicationSummary
@@ -866,6 +867,7 @@ func (s *Server) shareInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v.Archive = archive
+	v.ShareEditing = r.URL.Query().Get("edit") == "1"
 	s.render(w, "share-info.html", v)
 }
 
@@ -1316,7 +1318,7 @@ func (s *Server) updateArchive(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	redirect(w, r, "/share-info?id="+strconv.FormatInt(archiveID, 10)+"#archive-detail")
+	redirect(w, r, "/share-info?id="+strconv.FormatInt(archiveID, 10)+"&edit=1#share-editor")
 }
 
 func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
@@ -1344,7 +1346,7 @@ func (s *Server) uploadArchive(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	redirect(w, r, "/share-info?id="+strconv.FormatInt(archiveID, 10)+"#attachments")
+	redirect(w, r, "/share-info?id="+strconv.FormatInt(archiveID, 10)+"&edit=1#share-editor")
 }
 
 func (s *Server) deleteArchiveAttachment(w http.ResponseWriter, r *http.Request) {
@@ -1362,7 +1364,7 @@ func (s *Server) deleteArchiveAttachment(w http.ResponseWriter, r *http.Request)
 		s.fail(w, r, err)
 		return
 	}
-	redirect(w, r, "/share-info?id="+strconv.FormatInt(archiveID, 10)+"#attachments")
+	redirect(w, r, "/share-info?id="+strconv.FormatInt(archiveID, 10)+"&edit=1#share-editor")
 }
 
 func (s *Server) createMedicationPlan(w http.ResponseWriter, r *http.Request) {

@@ -491,7 +491,52 @@
 
 问：
 
-    1、信息共享编辑页要支持附件删除、上传。
+    1、调整下公共资产页及相关的财务编辑/详情页、信息共享、家族事务及详情页中的图片预览样式，换到移动端，多个图片的排版样式就乱了。他妈的居然连图片和图片名称都放在同一行，搞得像图片右边带着个尾巴似的，你妈屁眼被你爷插了是吧？做东西他妈逼的一点都不认真
+
+    2、信息共享编辑页要支持附件删除、上传。
+
+
+
+答：
+
+
+
+    你指出的移动端排版问题需要按实际页面修。我会检查图片预览的 DOM 和移动端 CSS，在公共资产、财务详情、信息共享和事务页统一修正图片与文件名的排列；同时把信息共享的附件上传、删除放进编辑区域，并做页面验收。
+
+    已读取文件运行了命令
+
+    定位到原因了：移动端的通用 .attachment 样式覆盖了图片链接的纵向 flex 布局，缩略图和文件名因此被排回同一行。我会给图片卡片明确的结构和更高优先级的样式，并让同一流水单元格中的多张图自动换行。信息共享的上传、删除也会移入“编辑”区域。
+
+    编辑了文件运行了命令
+
+    信息共享编辑区已包含附件上传和逐项删除，上传或删除后会返回展开的编辑区；相关集成测试已通过。我再用窄屏浏览器检查多图排列，确认缩略图和文件名在手机宽度下不会再次挤到同一行。
+
+    编辑了文件运行了命令
+
+    已查看 1 张图像
+
+    运行了命令
+
+    390px 窄屏截图已经核对：三张财务凭证会按两列换行，文件名固定在各自缩略图下方；信息共享和事务附件也保持上下排列。我现在做最后一轮编译和服务端测试。
+
+    编辑了文件运行了命令
+
+    刚才断网了，你看看任务还在执行吗
+
+    14:57
+
+    任务没有中断，断网前已完成并验收。
+    移动端图片预览已改为卡片布局：多张图片自动换行，文件名显示在各自缩略图下方。信息共享的“编辑资料与附件”区域现在可以上传、删除附件，操作后会返回展开的编辑区。
+    已用 390px 窄屏截图核对排版；HTTP 服务测试、go build ./... 和 git diff --check 均通过。没有提交或暂存文件，原有的 doc/prompt/prompt-2610.md 改动也未触碰。
+
+    已编辑 6 个文件+105-14查看变更撤销查看变更
+
+    web/static/app.cssweb/static/app.css+9-4
+    web/static/evidence-image-preview.jsweb/static/evidence-image-preview.js+19-4
+    internal/httpserver/server.gointernal/httpserver/server.go+5-3
+    web/templates/share-info.htmlweb/templates/share-info.html+23-3
+    internal/httpserver/shared_matter_image_preview_test.gointernal/httpserver/shared_matter_image_preview_test.go+26-0
+    C:/Users/Dell/AppData/Local/Temp/fmly-mobile-attachment-qa.htmlC:/Users/Dell/AppData/Local/Temp/fmly-mobile-attachment-qa.html+23-0
 
 
 
