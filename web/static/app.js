@@ -17,7 +17,7 @@
     if (!rows.length) {
       const row = document.createElement('tr');
       const cell = document.createElement('td');
-      cell.colSpan = 5;
+      cell.colSpan = tbody.closest('table').querySelector('thead tr').cells.length;
       cell.textContent = '暂无记录';
       row.appendChild(cell);
       tbody.appendChild(row);

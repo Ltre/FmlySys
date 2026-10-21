@@ -20,6 +20,7 @@ type AssetEvent struct {
 	HolderName, Description, OccurredAt string
 	RelatedEventID                      int64
 	RelatedLabel                        string
+	Evidence                            []Evidence
 }
 type AssetInflowOption struct {
 	ID                                        int64

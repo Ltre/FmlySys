@@ -294,6 +294,10 @@ func (s *Server) adminWorkflow(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	if err := s.attachAssetEventEvidence(r.Context(), v.AdminAssetEvents); err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	v.AssetInflows, err = s.Store.AssetInflowOptions(r.Context())
 	if err != nil {
 		s.fail(w, r, err)

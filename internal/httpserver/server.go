@@ -680,6 +680,20 @@ func (s *Server) populateCommon(r *http.Request, v *view, currentID int64) error
 	return err
 }
 
+func (s *Server) attachAssetEventEvidence(ctx context.Context, events []store.AssetEvent) error {
+	for i := range events {
+		if events[i].ID <= 0 {
+			continue // Derived balance movements have no separate asset-event attachment.
+		}
+		evidence, err := s.Store.EvidenceFor(ctx, "asset_event", events[i].ID)
+		if err != nil {
+			return err
+		}
+		events[i].Evidence = evidence
+	}
+	return nil
+}
+
 func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	v := s.base("FmlySys")
 	v.CurrentMember = currentMember(r)
@@ -719,11 +733,20 @@ func (s *Server) assets(w http.ResponseWriter, r *http.Request) {
 	m := currentMember(r)
 	v := s.base("公共资产")
 	v.Permissions = currentPermissions(r)
+	var err error
 	if err := s.populateCommon(r, &v, m.ID); err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	v.AssetEvents, _ = s.Store.AssetEvents(r.Context())
+	v.AssetEvents, err = s.Store.AssetEvents(r.Context())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if err := s.attachAssetEventEvidence(r.Context(), v.AssetEvents); err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	timeline, err := s.Store.FinancialTimeline(r.Context(), page, 20)
 	if err != nil {
@@ -745,6 +768,10 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 	var err error
 	v.AdminAssetEvents, err = s.Store.AssetEventsDetailed(r.Context())
 	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if err := s.attachAssetEventEvidence(r.Context(), v.AdminAssetEvents); err != nil {
 		s.fail(w, r, err)
 		return
 	}

@@ -36,7 +36,8 @@ func (s *Server) WithMoneyWorkflowV3(next http.Handler) http.Handler {
 }
 
 func (s *Server) createSelfAssetEventV3(w http.ResponseWriter, r *http.Request) {
-	if _, err := parseWorkflowRequest(w, r, false); err != nil {
+	files, err := parseWorkflowRequest(w, r, true)
+	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
@@ -51,7 +52,7 @@ func (s *Server) createSelfAssetEventV3(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	actor := currentMember(r).ID
-	id, err := s.Store.CreateAssetEventWorkflowAtomic(r.Context(), actor, actor, typ, amount, r.FormValue("description"), formDateTime(r.FormValue("occurred_at")), 0)
+	id, err := s.Store.CreateAssetEventWorkflowWithEvidenceAtomic(r.Context(), actor, actor, typ, amount, r.FormValue("description"), formDateTime(r.FormValue("occurred_at")), 0, evidenceDir(s), files)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -61,7 +62,8 @@ func (s *Server) createSelfAssetEventV3(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) adminCreateAssetEventV3(w http.ResponseWriter, r *http.Request) {
-	if _, err := parseWorkflowRequest(w, r, false); err != nil {
+	files, err := parseWorkflowRequest(w, r, true)
+	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
@@ -70,7 +72,7 @@ func (s *Server) adminCreateAssetEventV3(w http.ResponseWriter, r *http.Request)
 		s.fail(w, r, err)
 		return
 	}
-	id, err := s.Store.CreateAssetEventWorkflowAtomic(r.Context(), s.DevActorID, parseID(r.FormValue("holder_id")), r.FormValue("event_type"), amount, r.FormValue("description"), formDateTime(r.FormValue("occurred_at")), parseID(r.FormValue("related_event_id")))
+	id, err := s.Store.CreateAssetEventWorkflowWithEvidenceAtomic(r.Context(), s.DevActorID, parseID(r.FormValue("holder_id")), r.FormValue("event_type"), amount, r.FormValue("description"), formDateTime(r.FormValue("occurred_at")), parseID(r.FormValue("related_event_id")), evidenceDir(s), files)
 	if err != nil {
 		s.fail(w, r, err)
 		return

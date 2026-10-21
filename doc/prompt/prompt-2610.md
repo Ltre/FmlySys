@@ -393,6 +393,50 @@
 
 
 
+答：
+
+
+
+    我会检查前台和后台这四类记录目前怎样展示附件、怎样读取文件，再接入图片预览。非图片文件会保留原有打开方式，权限仍由现有附件路由控制。完成后会用真实页面渲染和请求测试验证。
+
+    运行了命令
+
+    检查发现消费、报销和成员转账已有凭据链接，服务端也已支持图片原样读取；缺的是页面内的预览交互。资产变动目前没有凭据上传入口，记录页也不加载附件。我会补齐资产变动的上传与展示，再让四类记录统一支持缩略图和放大预览。
+
+    编辑了文件运行了命令
+
+    四类记录的凭据链接已接入同一套图片预览交互；资产变动也已加入可选凭据上传和记录展示。构建已通过。接下来用隔离数据库验证前后台上传的图片能在记录中看到、能由原权限路由读取，并验证记录详情页。
+
+    编辑了文件运行了命令
+
+    隔离数据库的前后台验收已通过：资产变动上传的 PNG 被关联到对应记录，前台、后台和记录详情页都显示凭据链接；/evidence/{id} 返回可内联显示的 image/png 内容。我会再检查四类记录的模板覆盖、脚本语法和权限路径，然后跑相关测试。
+
+    编辑了文件运行了命令
+
+    四类记录在前台、后台及各自的详情页都已通过凭据链接验收。测试还确认：未登录不能读取图片、原文件按 image/png 内联返回，资产变动不上传附件时仍可正常登记。最后我会复核完整差异并运行构建与测试；之前那项无关的用药权限测试不会在这次修改中处理。
+
+    编辑了文件运行了命令
+
+    已实现前台和后台四类记录的图片直接预览：消费、报销、资产变动、成员内部转账的图片凭据会显示缩略图，点击后在当前页面放大；非图片附件保留原有打开方式。资产变动此前没有凭据上传入口，现在前后台登记时都可选传附件，并在流水和记录详情页查看。
+
+    隔离数据库验收覆盖了四类记录在前后台及详情页的凭据展示、资产变动上传、未登录访问拦截和无附件登记。构建、脚本语法及差异检查通过；项目测试在排除先前已确认失败的旧用药权限测试后通过。[预览脚本](</D:/Workspace/github/Ltre/FmlySys/web/static/evidence-image-preview.js>)和[验收测试](</D:/Workspace/github/Ltre/FmlySys/internal/httpserver/financial_image_preview_test.go>)均已留在工作区。未暂存或提交。
+
+    已编辑 11 个文件+344-7查看变更撤销查看变更
+
+    internal/httpserver/money_workflow_v3.gointernal/httpserver/money_workflow_v3.go+6-4
+    internal/store/models.gointernal/store/models.go+1-0
+    internal/store/money_workflow_atomic.gointernal/store/money_workflow_atomic.go+5-1
+    internal/httpserver/asset_workflow_fixes.gointernal/httpserver/asset_workflow_fixes.go+4-0
+    internal/httpserver/money_record_detail.gointernal/httpserver/money_record_detail.go+7-0
+    internal/httpserver/server.gointernal/httpserver/server.go+28-1
+    web/static/app.cssweb/static/app.css+9-0
+    web/static/app.jsweb/static/app.js+1-1
+    web/static/evidence-image-preview.jsweb/static/evidence-image-preview.js+48-0
+    web/templates/dashboard.htmlweb/templates/dashboard.html+1-0
+    internal/httpserver/financial_image_preview_test.gointernal/httpserver/financial_image_preview_test.go+234-0
+
+
+
 
 待问：
 

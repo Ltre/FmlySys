@@ -14,6 +14,7 @@ type moneyRecordDetailView struct {
 	AdminUsername   string
 	Record          store.MoneyRecordLocator
 	KindLabel       string
+	Evidence        []store.Evidence
 }
 
 func moneyRecordKindLabel(kind string) string {
@@ -44,6 +45,11 @@ func (s *Server) moneyRecordDetail(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	evidence, err := s.Store.EvidenceFor(r.Context(), record.Kind, record.ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	v := moneyRecordDetailView{
 		Title:           "资金记录详情",
 		ActivePartition: s.PM.ActiveID,
@@ -52,6 +58,7 @@ func (s *Server) moneyRecordDetail(w http.ResponseWriter, r *http.Request) {
 		AdminUsername:   currentAdmin(r).Username,
 		Record:          record,
 		KindLabel:       moneyRecordKindLabel(record.Kind),
+		Evidence:        evidence,
 	}
 	if err := s.Templates.ExecuteTemplate(w, "money-record-detail.html", v); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

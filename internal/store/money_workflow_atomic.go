@@ -272,7 +272,11 @@ func (s *Store) CreateReimbursementWorkflowAtomic(ctx context.Context, actor, ex
 }
 
 func (s *Store) CreateAssetEventWorkflowAtomic(ctx context.Context, actor, holder int64, typ string, amount int64, description, occurred string, relatedEventID int64) (int64, error) {
-	return s.atomicMoneyWithEvidence(ctx, actor, "asset_event", "", nil, func(dbCtx context.Context, tx *sql.Tx) (int64, error) {
+	return s.CreateAssetEventWorkflowWithEvidenceAtomic(ctx, actor, holder, typ, amount, description, occurred, relatedEventID, "", nil)
+}
+
+func (s *Store) CreateAssetEventWorkflowWithEvidenceAtomic(ctx context.Context, actor, holder int64, typ string, amount int64, description, occurred string, relatedEventID int64, uploadDir string, headers []*multipart.FileHeader) (int64, error) {
+	return s.atomicMoneyWithEvidence(ctx, actor, "asset_event", uploadDir, headers, func(dbCtx context.Context, tx *sql.Tx) (int64, error) {
 		return insertAssetEventTx(dbCtx, tx, actor, holder, typ, amount, description, occurred, relatedEventID)
 	})
 }
